@@ -35,6 +35,39 @@ var dialer = &net.Dialer{
 	KeepAlive: 30 * time.Second,
 }
 
+// contextAwareDialer wraps a proxy.Dialer to respect context cancellation and deadlines
+type contextAwareDialer struct {
+	dialer     proxy.Dialer
+	baseDialer *net.Dialer
+}
+
+func (d *contextAwareDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	// Check if context is already done
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Use a channel to handle the dial operation with context
+	type result struct {
+		conn net.Conn
+		err  error
+	}
+	resultChan := make(chan result, 1)
+
+	go func() {
+		conn, err := d.dialer.Dial(network, addr)
+		resultChan <- result{conn: conn, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Context cancelled, return error
+		return nil, ctx.Err()
+	case r := <-resultChan:
+		return r.conn, r.err
+	}
+}
+
 // GetClient returns an http.Client with the specified responseHeaderTimeout.
 // If a client with the same timeout already exists, it returns the cached one.
 // Otherwise, it creates a new client and caches it.
@@ -89,8 +122,9 @@ func GetClientWithProxy(responseHeaderTimeout time.Duration, proxyURL string) *h
 				var auth *proxy.Auth
 				if parsedURL.User != nil {
 					username := parsedURL.User.Username()
-					password, _ := parsedURL.User.Password()
-					if username != "" || password != "" {
+					password, hasPassword := parsedURL.User.Password()
+					// Only create auth if we have actual credentials
+					if username != "" && hasPassword {
 						auth = &proxy.Auth{
 							User:     username,
 							Password: password,
@@ -101,9 +135,9 @@ func GetClientWithProxy(responseHeaderTimeout time.Duration, proxyURL string) *h
 				socks5Dialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, dialer)
 				if err == nil {
 					// Use SOCKS5 dialer
-					transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-						return socks5Dialer.Dial(network, addr)
-					}
+					// Note: SOCKS5 dialer doesn't support context, so we wrap it
+					contextDialer := &contextAwareDialer{dialer: socks5Dialer, baseDialer: dialer}
+					transport.DialContext = contextDialer.DialContext
 				} else {
 					// Fall back to no proxy on error
 					transport.Proxy = http.ProxyFromEnvironment
