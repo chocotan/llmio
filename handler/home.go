@@ -45,6 +45,60 @@ func Metrics(c *gin.Context) {
 	})
 }
 
+type DailyMetric struct {
+	Date   string `json:"date"`
+	Reqs   int64  `json:"reqs"`
+	Tokens int64  `json:"tokens"`
+}
+
+// DailyMetrics returns statistics grouped by day for the specified number of days
+// The endpoint returns data for the last N days including today (N+1 days total)
+func DailyMetrics(c *gin.Context) {
+	days, err := strconv.Atoi(c.Param("days"))
+	if err != nil {
+		common.BadRequest(c, "Invalid days parameter")
+		return
+	}
+
+	now := time.Now()
+	year, month, day := now.Date()
+	// Get data from N days ago to today (inclusive)
+	startDate := time.Date(year, month, day, 0, 0, 0, 0, now.Location()).AddDate(0, 0, -days)
+
+	// Query to group by date
+	type dailyResult struct {
+		Date   string `gorm:"column:date"` // SQLite DATE() returns string in YYYY-MM-DD format
+		Reqs   int64  `gorm:"column:reqs"`
+		Tokens int64  `gorm:"column:tokens"`
+	}
+
+	var results []dailyResult
+	err = models.DB.
+		Model(&models.ChatLog{}).
+		Select("DATE(created_at) as date, COUNT(*) as reqs, COALESCE(SUM(total_tokens), 0) as tokens").
+		Where("created_at >= ?", startDate).
+		Group("DATE(created_at)").
+		Order("date ASC").
+		Scan(&results).Error
+
+	if err != nil {
+		common.InternalServerError(c, "Failed to query daily metrics: "+err.Error())
+		return
+	}
+
+	// Convert to response format
+	dailyMetrics := make([]DailyMetric, len(results))
+	for i, result := range results {
+		dailyMetrics[i] = DailyMetric{
+			Date:   result.Date, // Already in YYYY-MM-DD format
+			Reqs:   result.Reqs,
+			Tokens: result.Tokens,
+		}
+	}
+
+	common.Success(c, dailyMetrics)
+}
+
 type Count struct {
 	Model string `json:"model"`
 	Calls int64  `json:"calls"`

@@ -378,8 +378,18 @@ export interface ProjectCount {
   calls: number;
 }
 
+export interface DailyMetric {
+  date: string;
+  reqs: number;
+  tokens: number;
+}
+
 export async function getMetrics(days: number): Promise<MetricsData> {
   return apiRequest<MetricsData>(`/metrics/use/${days}`);
+}
+
+export async function getDailyMetrics(days: number): Promise<DailyMetric[]> {
+  return apiRequest<DailyMetric[]>(`/metrics/daily/${days}`);
 }
 
 export async function getModelCounts(): Promise<ModelCount[]> {

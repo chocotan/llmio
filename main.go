@@ -91,6 +91,7 @@ func main() {
 	api := router.Group("/api", middleware.Auth(token))
 	{
 		api.GET("/metrics/use/:days", handler.Metrics)
+		api.GET("/metrics/daily/:days", handler.DailyMetrics)
 		api.GET("/metrics/counts", handler.Counts)
 		api.GET("/metrics/projects", handler.ProjectCounts)
 		// Provider management
