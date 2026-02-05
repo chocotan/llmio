@@ -16,4 +16,5 @@ type AnthropicCountTokens struct {
 	BaseURL string `json:"base_url"`
 	APIKey  string `json:"api_key"`
 	Version string `json:"version"`
+	Proxy   string `json:"proxy,omitempty"`
 }

@@ -24,6 +24,7 @@ type Model struct {
 type Provider interface {
 	BuildReq(ctx context.Context, header http.Header, model string, rawData []byte) (*http.Request, error)
 	Models(ctx context.Context) ([]Model, error)
+	GetProxy() string // Returns the proxy URL if configured
 }
 
 func New(Type, providerConfig string) (Provider, error) {

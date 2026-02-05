@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/atopos31/llmio/consts"
 )
@@ -17,6 +18,7 @@ import (
 type Gemini struct {
 	BaseURL string `json:"base_url"`
 	APIKey  string `json:"api_key"`
+	Proxy   string `json:"proxy,omitempty"` // HTTP or SOCKS5 proxy URL (e.g., http://proxy:8080 or socks5://proxy:1080)
 }
 
 func (g *Gemini) BuildReq(ctx context.Context, header http.Header, model string, rawBody []byte) (*http.Request, error) {
@@ -50,6 +52,10 @@ func (g *Gemini) BuildReq(ctx context.Context, header http.Header, model string,
 	return req, nil
 }
 
+func (g *Gemini) GetProxy() string {
+	return g.Proxy
+}
+
 type geminiListModelsResponse struct {
 	Models        []geminiModel `json:"models"`
 	NextPageToken string        `json:"nextPageToken"`
@@ -67,7 +73,8 @@ func (g *Gemini) Models(ctx context.Context) ([]Model, error) {
 	req.Header.Set("x-goog-api-key", g.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	res, err := http.DefaultClient.Do(req)
+	client := GetClientWithProxy(30*time.Second, g.Proxy)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

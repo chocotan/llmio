@@ -16,6 +16,7 @@ type Anthropic struct {
 	BaseURL string `json:"base_url"`
 	APIKey  string `json:"api_key"`
 	Version string `json:"version"`
+	Proxy   string `json:"proxy,omitempty"` // HTTP or SOCKS5 proxy URL (e.g., http://proxy:8080 or socks5://proxy:1080)
 }
 
 func (a *Anthropic) BuildReq(ctx context.Context, header http.Header, model string, rawBody []byte) (*http.Request, error) {
@@ -34,6 +35,10 @@ func (a *Anthropic) BuildReq(ctx context.Context, header http.Header, model stri
 	req.Header.Set("x-api-key", a.APIKey)
 	req.Header.Set("anthropic-version", a.Version)
 	return req, nil
+}
+
+func (a *Anthropic) GetProxy() string {
+	return a.Proxy
 }
 
 type AnthropicModelsResponse struct {
@@ -58,7 +63,8 @@ func (a *Anthropic) Models(ctx context.Context) ([]Model, error) {
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", a.APIKey)
 	req.Header.Set("anthropic-version", a.Version)
-	res, err := http.DefaultClient.Do(req)
+	client := GetClientWithProxy(30*time.Second, a.Proxy)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

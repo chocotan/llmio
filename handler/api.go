@@ -414,21 +414,24 @@ var template = []ProviderTemplate{
 		Type: "openai",
 		Template: `{
 			"base_url": "https://api.openai.com/v1",
-			"api_key": "YOUR_API_KEY"
+			"api_key": "YOUR_API_KEY",
+			"proxy": ""
 		}`,
 	},
 	{
 		Type: "gemini",
 		Template: `{
 			"base_url": "https://generativelanguage.googleapis.com/v1beta",
-			"api_key": "YOUR_GEMINI_API_KEY"
+			"api_key": "YOUR_GEMINI_API_KEY",
+			"proxy": ""
 		}`,
 	},
 	{
 		Type: "openai-res",
 		Template: `{
 			"base_url": "https://api.openai.com/v1",
-			"api_key": "YOUR_API_KEY"
+			"api_key": "YOUR_API_KEY",
+			"proxy": ""
 		}`,
 	},
 	{
@@ -436,7 +439,8 @@ var template = []ProviderTemplate{
 		Template: `{
 			"base_url": "https://api.anthropic.com/v1",
 			"api_key": "YOUR_API_KEY",
-			"version": "2023-06-01"
+			"version": "2023-06-01",
+			"proxy": ""
 		}`,
 	},
 }

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/atopos31/llmio/common"
 	"github.com/atopos31/llmio/models"
@@ -37,6 +38,7 @@ func CountTokens(c *gin.Context) {
 		BaseURL: anthropicConfig.BaseURL,
 		APIKey:  anthropicConfig.APIKey,
 		Version: anthropicConfig.Version,
+		Proxy:   anthropicConfig.Proxy,
 	}
 
 	req, err := anthropic.BuildCountTokensReq(ctx, c.Request.Header, c.Request.Body)
@@ -45,7 +47,8 @@ func CountTokens(c *gin.Context) {
 		return
 	}
 
-	res, err := http.DefaultClient.Do(req)
+	client := providers.GetClientWithProxy(30*time.Second, anthropic.Proxy)
+	res, err := client.Do(req)
 	if err != nil {
 		common.InternalServerError(c, "Failed to send request: "+err.Error())
 		return
@@ -105,6 +108,7 @@ func TestCountTokens(c *gin.Context) {
 		BaseURL: anthropicConfig.BaseURL,
 		APIKey:  anthropicConfig.APIKey,
 		Version: anthropicConfig.Version,
+		Proxy:   anthropicConfig.Proxy,
 	}
 
 	req, err := anthropic.BuildCountTokensReq(ctx, nil, strings.NewReader(testBody))
@@ -113,7 +117,8 @@ func TestCountTokens(c *gin.Context) {
 		return
 	}
 
-	res, err := http.DefaultClient.Do(req)
+	client := providers.GetClientWithProxy(30*time.Second, anthropic.Proxy)
+	res, err := client.Do(req)
 	if err != nil {
 		common.InternalServerError(c, "Failed to send request: "+err.Error())
 		return
