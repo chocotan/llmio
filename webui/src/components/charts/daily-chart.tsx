@@ -30,6 +30,8 @@ const chartConfig = {
   },
 } satisfies ChartConfig
 
+const TOKEN_DISPLAY_DIVISOR = 1000 // Convert tokens to K for better readability
+
 interface DailyChartProps {
   data: DailyMetric[]
   title?: string
@@ -41,7 +43,7 @@ export function DailyChart({ data, title = "每日统计", description = "请求
   const chartData = data.map(item => ({
     date: item.date,
     reqs: item.reqs,
-    tokens: Math.round(item.tokens / 1000), // Convert to K tokens for better display
+    tokens: Math.round(item.tokens / TOKEN_DISPLAY_DIVISOR), // Convert to K tokens for better display
   }))
 
   return (
@@ -67,8 +69,9 @@ export function DailyChart({ data, title = "每日统计", description = "请求
               axisLine={false}
               tickMargin={8}
               tickFormatter={(value) => {
-                // Show only month-day
-                const date = new Date(value)
+                // Parse date string as local date to avoid timezone issues
+                const [year, month, day] = value.split('-').map(Number)
+                const date = new Date(year, month - 1, day)
                 return `${date.getMonth() + 1}/${date.getDate()}`
               }}
             />
@@ -92,7 +95,10 @@ export function DailyChart({ data, title = "每日统计", description = "请求
               content={
                 <ChartTooltipContent
                   labelFormatter={(value) => {
-                    return new Date(value).toLocaleDateString("zh-CN", {
+                    // Parse date string as local date to avoid timezone issues
+                    const [year, month, day] = value.split('-').map(Number)
+                    const date = new Date(year, month - 1, day)
+                    return date.toLocaleDateString("zh-CN", {
                       month: "short",
                       day: "numeric",
                     })

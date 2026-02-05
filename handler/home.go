@@ -52,6 +52,7 @@ type DailyMetric struct {
 }
 
 // DailyMetrics returns statistics grouped by day for the specified number of days
+// The endpoint returns data for the last N days including today (N+1 days total)
 func DailyMetrics(c *gin.Context) {
 	days, err := strconv.Atoi(c.Param("days"))
 	if err != nil {
@@ -61,6 +62,7 @@ func DailyMetrics(c *gin.Context) {
 
 	now := time.Now()
 	year, month, day := now.Date()
+	// Get data from N days ago to today (inclusive)
 	startDate := time.Date(year, month, day, 0, 0, 0, 0, now.Location()).AddDate(0, 0, -days)
 
 	// Query to group by date
