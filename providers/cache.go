@@ -17,8 +17,8 @@ const (
 )
 
 type clientCacheKey struct {
-	timeout   time.Duration
-	proxyURL  string
+	timeout  time.Duration
+	proxyURL string
 }
 
 type clientCache struct {
@@ -131,7 +131,7 @@ func GetClientWithProxy(responseHeaderTimeout time.Duration, proxyURL string) *h
 						}
 					}
 				}
-				
+
 				socks5Dialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, dialer)
 				if err == nil {
 					// Use SOCKS5 dialer

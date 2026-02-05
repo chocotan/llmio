@@ -445,6 +445,16 @@ var template = []ProviderTemplate{
 	},
 }
 
+const proxyExamples = `
+代理示例:
+- http://127.0.0.1:7890         (HTTP 代理)
+- socks5://127.0.0.1:1080      (SOCKS5 无认证)
+- socks5://user:pass@127.0.0.1:1080  (SOCKS5 带认证)
+- https://proxy.com:8080       (HTTPS 代理)
+
+如无需代理，请留空。'
+`
+
 func GetProviderTemplates(c *gin.Context) {
 	common.Success(c, template)
 }

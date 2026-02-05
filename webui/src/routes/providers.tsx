@@ -19,11 +19,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Tooltip,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -700,7 +695,13 @@ export default function ProvidersPage() {
               <FormField
                 control={form.control}
                 name="config"
-                render={({ field }) => (
+                render={({ field }) => {
+                  const currentType = form.getValues("type") || selectedProviderType;
+                  const isProxySupported = ['openai', 'anthropic', 'gemini', 'openai-res'].includes(currentType);
+
+                  console.log('[DEBUG] currentType:', currentType, 'isProxySupported:', isProxySupported);
+
+                  return (
                   <FormItem>
                     <FormLabel>配置</FormLabel>
                     {structuredConfigEnabled ? (
@@ -720,7 +721,7 @@ export default function ProvidersPage() {
                                 onChange={(event) =>
                                   handleConfigFieldChange(key, event.target.value)
                                 }
-                                placeholder={`请输入 ${key}`}
+                                placeholder={key === 'proxy' ? '例: socks5://user:pass@host:port' : `请输入 ${key}`}
                               />
                             </div>
                           ))}
@@ -736,7 +737,8 @@ export default function ProvidersPage() {
                     )}
                     <FormMessage />
                   </FormItem>
-                )}
+                );
+                }}
               />
 
               <FormField
@@ -815,20 +817,14 @@ export default function ProvidersPage() {
                       <div className="flex-1">
                         <div className="font-medium">{model.id}</div>
                       </div>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => copyModelName(model.id)}
-                              className="min-w-12"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" className="h-4 w-4"><path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
-                            </Button>
-                          </TooltipTrigger>
-                        </Tooltip>
-                      </TooltipProvider>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => copyModelName(model.id)}
+                        className="min-w-12"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true" className="h-4 w-4"><path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                      </Button>
                     </div>
                   ))}
                 </div>
