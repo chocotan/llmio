@@ -63,7 +63,7 @@ func (a *Anthropic) Models(ctx context.Context) ([]Model, error) {
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", a.APIKey)
 	req.Header.Set("anthropic-version", a.Version)
-	client := GetClientWithProxy(30*time.Second, a.Proxy)
+	client := GetClientWithProxy(DefaultModelsTimeout, a.Proxy)
 	res, err := client.Do(req)
 	if err != nil {
 		return nil, err

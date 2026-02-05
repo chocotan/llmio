@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/atopos31/llmio/common"
 	"github.com/atopos31/llmio/models"
@@ -47,7 +46,7 @@ func CountTokens(c *gin.Context) {
 		return
 	}
 
-	client := providers.GetClientWithProxy(30*time.Second, anthropic.Proxy)
+	client := providers.GetClientWithProxy(providers.DefaultModelsTimeout, anthropic.Proxy)
 	res, err := client.Do(req)
 	if err != nil {
 		common.InternalServerError(c, "Failed to send request: "+err.Error())
@@ -117,7 +116,7 @@ func TestCountTokens(c *gin.Context) {
 		return
 	}
 
-	client := providers.GetClientWithProxy(30*time.Second, anthropic.Proxy)
+	client := providers.GetClientWithProxy(providers.DefaultModelsTimeout, anthropic.Proxy)
 	res, err := client.Do(req)
 	if err != nil {
 		common.InternalServerError(c, "Failed to send request: "+err.Error())

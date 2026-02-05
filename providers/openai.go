@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/tidwall/sjson"
 )
@@ -45,7 +44,7 @@ func (o *OpenAI) Models(ctx context.Context) ([]Model, error) {
 		return nil, err
 	}
 	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", o.APIKey))
-	client := GetClientWithProxy(30*time.Second, o.Proxy)
+	client := GetClientWithProxy(DefaultModelsTimeout, o.Proxy)
 	res, err := client.Do(req)
 	if err != nil {
 		return nil, err

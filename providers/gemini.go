@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/atopos31/llmio/consts"
 )
@@ -73,7 +72,7 @@ func (g *Gemini) Models(ctx context.Context) ([]Model, error) {
 	req.Header.Set("x-goog-api-key", g.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 
-	client := GetClientWithProxy(30*time.Second, g.Proxy)
+	client := GetClientWithProxy(DefaultModelsTimeout, g.Proxy)
 	res, err := client.Do(req)
 	if err != nil {
 		return nil, err

@@ -11,6 +11,11 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+const (
+	// DefaultModelsTimeout is the default timeout for fetching provider models
+	DefaultModelsTimeout = 30 * time.Second
+)
+
 type clientCacheKey struct {
 	timeout   time.Duration
 	proxyURL  string
@@ -81,10 +86,16 @@ func GetClientWithProxy(responseHeaderTimeout time.Duration, proxyURL string) *h
 				transport.DialContext = dialer.DialContext
 			case "socks5":
 				// SOCKS5 proxy
-				auth := &proxy.Auth{}
+				var auth *proxy.Auth
 				if parsedURL.User != nil {
-					auth.User = parsedURL.User.Username()
-					auth.Password, _ = parsedURL.User.Password()
+					username := parsedURL.User.Username()
+					password, _ := parsedURL.User.Password()
+					if username != "" || password != "" {
+						auth = &proxy.Auth{
+							User:     username,
+							Password: password,
+						}
+					}
 				}
 				
 				socks5Dialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, dialer)
