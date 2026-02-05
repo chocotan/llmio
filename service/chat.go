@@ -50,7 +50,6 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 	if before.Stream {
 		responseHeaderTimeout = responseHeaderTimeout / 3
 	}
-	client := providers.GetClient(responseHeaderTimeout)
 
 	authKeyID, _ := ctx.Value(consts.ContextKeyAuthKeyID).(uint)
 
@@ -82,6 +81,11 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 			if err != nil {
 				return nil, nil, err
 			}
+
+			// Get proxy-aware client for this specific provider
+			// Note: GetClientWithProxy caches clients by (timeout, proxy) key,
+			// so the same client is reused across retries with identical configuration
+			client := providers.GetClientWithProxy(responseHeaderTimeout, chatModel.GetProxy())
 
 			slog.Info("using provider", "provider", provider.Name, "model", modelWithProvider.ProviderModel)
 

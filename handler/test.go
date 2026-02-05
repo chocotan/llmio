@@ -104,8 +104,8 @@ func ProviderTestHandler(c *gin.Context) {
 		return
 	}
 
-	// Test connectivity by fetching models
-	client := providers.GetClient(time.Second * time.Duration(30))
+	// Get proxy-aware client for this specific provider
+	client := providers.GetClientWithProxy(time.Second*time.Duration(30), providerInstance.GetProxy())
 	var testBody []byte
 	switch chatModel.Type {
 	case consts.StyleOpenAI:

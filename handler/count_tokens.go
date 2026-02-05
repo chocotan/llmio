@@ -37,6 +37,7 @@ func CountTokens(c *gin.Context) {
 		BaseURL: anthropicConfig.BaseURL,
 		APIKey:  anthropicConfig.APIKey,
 		Version: anthropicConfig.Version,
+		Proxy:   anthropicConfig.Proxy,
 	}
 
 	req, err := anthropic.BuildCountTokensReq(ctx, c.Request.Header, c.Request.Body)
@@ -45,7 +46,8 @@ func CountTokens(c *gin.Context) {
 		return
 	}
 
-	res, err := http.DefaultClient.Do(req)
+	client := providers.GetClientWithProxy(providers.DefaultModelsTimeout, anthropic.Proxy)
+	res, err := client.Do(req)
 	if err != nil {
 		common.InternalServerError(c, "Failed to send request: "+err.Error())
 		return
@@ -105,6 +107,7 @@ func TestCountTokens(c *gin.Context) {
 		BaseURL: anthropicConfig.BaseURL,
 		APIKey:  anthropicConfig.APIKey,
 		Version: anthropicConfig.Version,
+		Proxy:   anthropicConfig.Proxy,
 	}
 
 	req, err := anthropic.BuildCountTokensReq(ctx, nil, strings.NewReader(testBody))
@@ -113,7 +116,8 @@ func TestCountTokens(c *gin.Context) {
 		return
 	}
 
-	res, err := http.DefaultClient.Do(req)
+	client := providers.GetClientWithProxy(providers.DefaultModelsTimeout, anthropic.Proxy)
+	res, err := client.Do(req)
 	if err != nil {
 		common.InternalServerError(c, "Failed to send request: "+err.Error())
 		return
