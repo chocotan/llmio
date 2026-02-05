@@ -67,9 +67,9 @@ func DailyMetrics(c *gin.Context) {
 
 	// Query to group by date
 	type dailyResult struct {
-		Date   time.Time `gorm:"column:date"`
-		Reqs   int64     `gorm:"column:reqs"`
-		Tokens int64     `gorm:"column:tokens"`
+		Date   string `gorm:"column:date"` // SQLite DATE() returns string in YYYY-MM-DD format
+		Reqs   int64  `gorm:"column:reqs"`
+		Tokens int64  `gorm:"column:tokens"`
 	}
 
 	var results []dailyResult
@@ -90,7 +90,7 @@ func DailyMetrics(c *gin.Context) {
 	dailyMetrics := make([]DailyMetric, len(results))
 	for i, result := range results {
 		dailyMetrics[i] = DailyMetric{
-			Date:   result.Date.Format("2006-01-02"),
+			Date:   result.Date, // Already in YYYY-MM-DD format
 			Reqs:   result.Reqs,
 			Tokens: result.Tokens,
 		}
