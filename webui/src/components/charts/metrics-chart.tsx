@@ -102,9 +102,10 @@ export function MetricsChart({ title = "统计图表", description = "请求和T
       // Format hour: "2024-01-15 08:00:00" -> "01/15 08:00"
       const parts = value.split(' ')
       if (parts.length >= 2) {
-        const [, month, day] = parts[0].split('-').map(Number)
+        const [year, month, day] = parts[0].split('-').map(Number)
+        const date = new Date(year, month - 1, day)
         const time = parts[1].substring(0, 5) // "HH:MM"
-        return `${month}/${day} ${time}`
+        return `${date.getMonth() + 1}/${date.getDate()} ${time}`
       }
       return value
     }
