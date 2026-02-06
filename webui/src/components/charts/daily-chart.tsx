@@ -1,6 +1,6 @@
 "use client"
 
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
 import {
   Card,
@@ -54,7 +54,7 @@ export function DailyChart({ data, title = "每日统计", description = "请求
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="aspect-auto h-[320px] w-full">
-          <LineChart
+          <BarChart
             accessibilityLayer
             data={chartData}
             margin={{
@@ -113,23 +113,19 @@ export function DailyChart({ data, title = "每日统计", description = "请求
               }
             />
             <ChartLegend content={<ChartLegendContent />} />
-            <Line
+            <Bar
               yAxisId="left"
               dataKey="reqs"
-              type="monotone"
-              stroke="var(--color-reqs)"
-              strokeWidth={2}
-              dot={false}
+              fill="var(--color-reqs)"
+              radius={[4, 4, 0, 0]}
             />
-            <Line
+            <Bar
               yAxisId="right"
               dataKey="tokens"
-              type="monotone"
-              stroke="var(--color-tokens)"
-              strokeWidth={2}
-              dot={false}
+              fill="var(--color-tokens)"
+              radius={[4, 4, 0, 0]}
             />
-          </LineChart>
+          </BarChart>
         </ChartContainer>
       </CardContent>
     </Card>

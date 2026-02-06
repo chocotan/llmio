@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts"
 import {
   Card,
   CardContent,
@@ -173,7 +173,7 @@ export function MetricsChart({ title = "统计图表", description = "请求和T
           </div>
         ) : (
           <ChartContainer config={chartConfig} className="aspect-auto h-[320px] w-full">
-            <LineChart
+            <BarChart
               accessibilityLayer
               data={chartData}
               margin={{
@@ -220,37 +220,19 @@ export function MetricsChart({ title = "统计图表", description = "请求和T
                 }
               />
               <ChartLegend content={<ChartLegendContent />} />
-              <Line
+              <Bar
                 yAxisId="left"
                 dataKey="reqs"
-                type="monotone"
-                stroke="var(--color-reqs)"
-                strokeWidth={2}
-                dot={{
-                  fill: "var(--color-reqs)",
-                  strokeWidth: 2,
-                  r: 3,
-                }}
-                activeDot={{
-                  r: 5,
-                }}
+                fill="var(--color-reqs)"
+                radius={[4, 4, 0, 0]}
               />
-              <Line
+              <Bar
                 yAxisId="right"
                 dataKey="tokens"
-                type="monotone"
-                stroke="var(--color-tokens)"
-                strokeWidth={2}
-                dot={{
-                  fill: "var(--color-tokens)",
-                  strokeWidth: 2,
-                  r: 3,
-                }}
-                activeDot={{
-                  r: 5,
-                }}
+                fill="var(--color-tokens)"
+                radius={[4, 4, 0, 0]}
               />
-            </LineChart>
+            </BarChart>
           </ChartContainer>
         )}
       </CardContent>
