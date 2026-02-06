@@ -205,7 +205,7 @@ export function MetricsChart({ title = "统计图表", description = "请求和T
                 axisLine={false}
                 tickFormatter={(value) => `${value}K`}
                 width={60}
-                label={{ value: 'Token数量 (K)', angle: 90, position: 'insideRight', style: { textAnchor: 'middle' } }}
+                label={{ value: 'Token数量 (K)', angle: -90, position: 'insideRight', style: { textAnchor: 'middle' } }}
               />
               <ChartTooltip
                 cursor={false}

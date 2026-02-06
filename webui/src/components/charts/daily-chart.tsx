@@ -90,7 +90,7 @@ export function DailyChart({ data, title = "每日统计", description = "请求
               axisLine={false}
               tickFormatter={(value) => `${value}K`}
               width={60}
-              label={{ value: 'Token数量 (K)', angle: 90, position: 'insideRight', style: { textAnchor: 'middle' } }}
+              label={{ value: 'Token数量 (K)', angle: -90, position: 'insideRight', style: { textAnchor: 'middle' } }}
             />
             <ChartTooltip
               cursor={false}
