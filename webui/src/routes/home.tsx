@@ -8,9 +8,8 @@ import {
   getMetrics,
   getModelCounts,
   getProjectCounts,
-  getDailyMetrics
 } from "@/lib/api";
-import type { MetricsData, ModelCount, ProjectCount, DailyMetric } from "@/lib/api";
+import type { MetricsData, ModelCount, ProjectCount } from "@/lib/api";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
 
@@ -19,7 +18,7 @@ const ChartPieDonutText = lazy(() => import("@/components/charts/pie-chart").the
 const ModelRankingChart = lazy(() => import("@/components/charts/bar-chart").then(module => ({ default: module.ModelRankingChart })));
 const ProjectChartPieDonutText = lazy(() => import("@/components/charts/project-pie-chart").then(module => ({ default: module.ProjectChartPieDonutText })));
 const ProjectRankingChart = lazy(() => import("@/components/charts/project-bar-chart").then(module => ({ default: module.ProjectRankingChart })));
-const DailyChart = lazy(() => import("@/components/charts/daily-chart").then(module => ({ default: module.DailyChart })));
+const MetricsChart = lazy(() => import("@/components/charts/metrics-chart").then(module => ({ default: module.MetricsChart })));
 
 // Animated counter component
 const AnimatedCounter = ({ value, duration = 1000 }: { value: number; duration?: number }) => {
@@ -80,7 +79,6 @@ export default function Home() {
   const [totalMetrics, setTotalMetrics] = useState<MetricsData>({ reqs: 0, tokens: 0 });
   const [modelCounts, setModelCounts] = useState<ModelCount[]>([]);
   const [projectCounts, setProjectCounts] = useState<ProjectCount[]>([]);
-  const [dailyMetrics, setDailyMetrics] = useState<DailyMetric[]>([]);
 
   const fetchTodayMetrics = useCallback(async () => {
     try {
@@ -126,22 +124,11 @@ export default function Home() {
     }
   }, []);
 
-  const fetchDailyMetrics = useCallback(async () => {
-    try {
-      const data = await getDailyMetrics(30); // Get last 30 days
-      setDailyMetrics(data);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(`获取每日统计失败: ${message}`);
-      console.error(err);
-    }
-  }, []);
-
   const load = useCallback(async () => {
     setLoading(true);
-    await Promise.all([fetchTodayMetrics(), fetchTotalMetrics(), fetchModelCounts(), fetchProjectCounts(), fetchDailyMetrics()]);
+    await Promise.all([fetchTodayMetrics(), fetchTotalMetrics(), fetchModelCounts(), fetchProjectCounts()]);
     setLoading(false);
-  }, [fetchModelCounts, fetchProjectCounts, fetchTodayMetrics, fetchTotalMetrics, fetchDailyMetrics]);
+  }, [fetchModelCounts, fetchProjectCounts, fetchTodayMetrics, fetchTotalMetrics]);
 
   useEffect(() => {
     void load();
@@ -204,7 +191,7 @@ export default function Home() {
               <Suspense fallback={<div className="h-64 flex items-center justify-center">
                 <Loading message="加载图表..." />
               </div>}>
-                <DailyChart data={dailyMetrics} title="最近30天统计" description="每日请求和Token使用趋势" />
+                <MetricsChart title="统计图表" description="请求和Token使用趋势" />
               </Suspense>
             </div>
 
