@@ -99,6 +99,59 @@ func DailyMetrics(c *gin.Context) {
 	common.Success(c, dailyMetrics)
 }
 
+type HourlyMetric struct {
+	Hour   string `json:"hour"`
+	Reqs   int64  `json:"reqs"`
+	Tokens int64  `json:"tokens"`
+}
+
+// HourlyMetrics returns statistics grouped by hour for the specified number of hours
+// The endpoint returns data for the last N hours including current hour
+func HourlyMetrics(c *gin.Context) {
+	hours, err := strconv.Atoi(c.Param("hours"))
+	if err != nil {
+		common.BadRequest(c, "Invalid hours parameter")
+		return
+	}
+
+	now := time.Now()
+	// Get data from N hours ago to now (inclusive)
+	startTime := now.Add(-time.Duration(hours) * time.Hour)
+
+	// Query to group by hour
+	type hourlyResult struct {
+		Hour   string `gorm:"column:hour"` // SQLite strftime returns string
+		Reqs   int64  `gorm:"column:reqs"`
+		Tokens int64  `gorm:"column:tokens"`
+	}
+
+	var results []hourlyResult
+	err = models.DB.
+		Model(&models.ChatLog{}).
+		Select("strftime('%Y-%m-%d %H:00:00', created_at) as hour, COUNT(*) as reqs, COALESCE(SUM(total_tokens), 0) as tokens").
+		Where("created_at >= ?", startTime).
+		Group("strftime('%Y-%m-%d %H:00:00', created_at)").
+		Order("hour ASC").
+		Scan(&results).Error
+
+	if err != nil {
+		common.InternalServerError(c, "Failed to query hourly metrics: "+err.Error())
+		return
+	}
+
+	// Convert to response format
+	hourlyMetrics := make([]HourlyMetric, len(results))
+	for i, result := range results {
+		hourlyMetrics[i] = HourlyMetric{
+			Hour:   result.Hour,
+			Reqs:   result.Reqs,
+			Tokens: result.Tokens,
+		}
+	}
+
+	common.Success(c, hourlyMetrics)
+}
+
 type Count struct {
 	Model string `json:"model"`
 	Calls int64  `json:"calls"`

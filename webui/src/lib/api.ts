@@ -384,12 +384,22 @@ export interface DailyMetric {
   tokens: number;
 }
 
+export interface HourlyMetric {
+  hour: string;
+  reqs: number;
+  tokens: number;
+}
+
 export async function getMetrics(days: number): Promise<MetricsData> {
   return apiRequest<MetricsData>(`/metrics/use/${days}`);
 }
 
 export async function getDailyMetrics(days: number): Promise<DailyMetric[]> {
   return apiRequest<DailyMetric[]>(`/metrics/daily/${days}`);
+}
+
+export async function getHourlyMetrics(hours: number): Promise<HourlyMetric[]> {
+  return apiRequest<HourlyMetric[]>(`/metrics/hourly/${hours}`);
 }
 
 export async function getModelCounts(): Promise<ModelCount[]> {
