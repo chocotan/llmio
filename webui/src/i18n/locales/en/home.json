@@ -3,6 +3,19 @@
   "refresh": "Refresh Overview",
   "loading": "Loading overview",
   "loading_chart": "Loading chart...",
+  "charts": {
+    "provider_model_calls": {
+      "value_label": "Calls"
+    },
+    "provider_model_calls_24h": {
+      "title": "Top Provider-Model Calls (24h)",
+      "description": "Provider-model combinations with the most calls in the last 24 hours"
+    },
+    "provider_model_calls_7d": {
+      "title": "Top Provider-Model Calls (7d)",
+      "description": "Provider-model combinations with the most calls in the last 7 days"
+    }
+  },
   "cards": {
     "today_requests": "Today's Requests",
     "today_requests_desc": "Total requests processed today",
@@ -17,6 +30,7 @@
     "today_metrics": "Failed to fetch today's metrics: {{message}}",
     "total_metrics": "Failed to fetch total metrics: {{message}}",
     "model_counts": "Failed to fetch model usage stats: {{message}}",
+    "provider_model_calls": "Failed to fetch provider-model usage stats: {{message}}",
     "project_counts": "Failed to fetch project usage stats: {{message}}"
   }
 }

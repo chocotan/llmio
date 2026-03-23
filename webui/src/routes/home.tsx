@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import Loading from "@/components/loading";
 import {
   getMetrics,
-  getModelTokenUsages,
+  getProviderModelCalls,
   getProjectCounts,
 } from "@/lib/api";
-import type { MetricsData, ModelTokenUsage, ProjectCount } from "@/lib/api";
+import type { MetricsData, ProjectCount, ProviderModelCall } from "@/lib/api";
+import type { RankingChartItem } from "@/components/charts/bar-chart";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
 
@@ -19,6 +20,13 @@ const ModelRankingChart = lazy(() => import("@/components/charts/bar-chart").the
 const ProjectChartPieDonutText = lazy(() => import("@/components/charts/project-pie-chart").then(module => ({ default: module.ProjectChartPieDonutText })));
 const ProjectRankingChart = lazy(() => import("@/components/charts/project-bar-chart").then(module => ({ default: module.ProjectRankingChart })));
 const MetricsChart = lazy(() => import("@/components/charts/metrics-chart").then(module => ({ default: module.MetricsChart })));
+
+const toProviderModelRankingData = (items: ProviderModelCall[]): RankingChartItem[] => (
+  items.map((item) => ({
+    label: `${item.provider} / ${item.model}`,
+    value: item.calls,
+  }))
+);
 
 // Animated counter component
 const AnimatedCounter = ({ value, duration = 1000 }: { value: number; duration?: number }) => {
@@ -78,8 +86,8 @@ export default function Home() {
   // Real data from APIs
   const [todayMetrics, setTodayMetrics] = useState<MetricsData>({ reqs: 0, tokens: 0 });
   const [totalMetrics, setTotalMetrics] = useState<MetricsData>({ reqs: 0, tokens: 0 });
-  const [modelTokens24h, setModelTokens24h] = useState<ModelTokenUsage[]>([]);
-  const [modelTokens7d, setModelTokens7d] = useState<ModelTokenUsage[]>([]);
+  const [providerModelCalls24h, setProviderModelCalls24h] = useState<ProviderModelCall[]>([]);
+  const [providerModelCalls7d, setProviderModelCalls7d] = useState<ProviderModelCall[]>([]);
   const [projectCounts, setProjectCounts] = useState<ProjectCount[]>([]);
 
   const { t } = useTranslation('home');
@@ -106,24 +114,24 @@ export default function Home() {
     }
   }, [t]);
 
-  const fetchModelTokens24h = useCallback(async () => {
+  const fetchProviderModelCalls24h = useCallback(async () => {
     try {
-      const data = await getModelTokenUsages(24);
-      setModelTokens24h(data);
+      const data = await getProviderModelCalls(24);
+      setProviderModelCalls24h(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(t('errors.model_tokens', { message }));
+      toast.error(t('errors.provider_model_calls', { message }));
       console.error(err);
     }
   }, [t]);
 
-  const fetchModelTokens7d = useCallback(async () => {
+  const fetchProviderModelCalls7d = useCallback(async () => {
     try {
-      const data = await getModelTokenUsages(24 * 7);
-      setModelTokens7d(data);
+      const data = await getProviderModelCalls(24 * 7);
+      setProviderModelCalls7d(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(t('errors.model_tokens', { message }));
+      toast.error(t('errors.provider_model_calls', { message }));
       console.error(err);
     }
   }, [t]);
@@ -141,9 +149,9 @@ export default function Home() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    await Promise.all([fetchTodayMetrics(), fetchTotalMetrics(), fetchModelTokens24h(), fetchModelTokens7d(), fetchProjectCounts()]);
+    await Promise.all([fetchTodayMetrics(), fetchTotalMetrics(), fetchProviderModelCalls24h(), fetchProviderModelCalls7d(), fetchProjectCounts()]);
     setLoading(false);
-  }, [fetchModelTokens24h, fetchModelTokens7d, fetchProjectCounts, fetchTodayMetrics, fetchTotalMetrics]);
+  }, [fetchProjectCounts, fetchProviderModelCalls24h, fetchProviderModelCalls7d, fetchTodayMetrics, fetchTotalMetrics]);
 
   useEffect(() => {
     void load();
@@ -195,9 +203,10 @@ export default function Home() {
                 <Loading message={t('loading_chart')} />
               </div>}>
                 <ModelRankingChart
-                  data={modelTokens24h}
-                  title="近 24 小时模型 Token 排行"
-                  description="展示近 24 小时 token 使用量最高的模型"
+                  data={toProviderModelRankingData(providerModelCalls24h)}
+                  title={t('charts.provider_model_calls_24h.title')}
+                  description={t('charts.provider_model_calls_24h.description')}
+                  valueLabel={t('charts.provider_model_calls.value_label')}
                 />
               </Suspense>
               <Suspense fallback={<div className="h-64 flex items-center justify-center">
@@ -212,9 +221,10 @@ export default function Home() {
                 <Loading message={t('loading_chart')} />
               </div>}>
                 <ModelRankingChart
-                  data={modelTokens7d}
-                  title="近 7 天模型 Token 排行"
-                  description="展示近 7 天 token 使用量最高的模型"
+                  data={toProviderModelRankingData(providerModelCalls7d)}
+                  title={t('charts.provider_model_calls_7d.title')}
+                  description={t('charts.provider_model_calls_7d.description')}
+                  valueLabel={t('charts.provider_model_calls.value_label')}
                 />
               </Suspense>
               <Suspense fallback={<div className="h-64 flex items-center justify-center">
