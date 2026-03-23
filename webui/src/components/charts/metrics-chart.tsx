@@ -28,10 +28,6 @@ import { getDailyMetrics, getHourlyMetrics } from "@/lib/api"
 import { toast } from "sonner"
 
 const chartConfig = {
-  reqs: {
-    label: "请求数",
-    color: "hsl(var(--chart-1))",
-  },
   tokens: {
     label: "Token数",
     color: "hsl(var(--chart-2))",
@@ -48,13 +44,12 @@ interface MetricsChartProps {
   description?: string
 }
 
-export function MetricsChart({ title = "统计图表", description = "请求和Token使用趋势" }: MetricsChartProps) {
+export function MetricsChart({ title = "统计图表", description = "Token 使用趋势" }: MetricsChartProps) {
   const [timeRange, setTimeRange] = useState<TimeRange>("30d")
   const [granularity, setGranularity] = useState<Granularity>("day")
   const [loading, setLoading] = useState(false)
   const [chartData, setChartData] = useState<Array<{
     time: string
-    reqs: number
     tokens: number
   }>>([])
 
@@ -67,7 +62,6 @@ export function MetricsChart({ title = "统计图表", description = "请求和T
           const data = await getDailyMetrics(days)
           setChartData(data.map(item => ({
             time: item.date,
-            reqs: item.reqs,
             tokens: Math.round(item.tokens / TOKEN_DISPLAY_DIVISOR),
           })))
         } else {
@@ -76,7 +70,6 @@ export function MetricsChart({ title = "统计图表", description = "请求和T
           const data = await getHourlyMetrics(hours)
           setChartData(data.map(item => ({
             time: item.hour,
-            reqs: item.reqs,
             tokens: Math.round(item.tokens / TOKEN_DISPLAY_DIVISOR),
           })))
         }
@@ -191,45 +184,23 @@ export function MetricsChart({ title = "统计图表", description = "请求和T
                 interval="preserveStartEnd"
               />
               <YAxis
-                yAxisId="left"
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(value) => Number(value).toLocaleString()}
-                width={60}
-                label={{ value: '调用次数', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
-              />
-              <YAxis
-                yAxisId="right"
-                orientation="right"
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={(value) => `${value}K`}
                 width={60}
-                label={{ value: 'Token数量 (K)', angle: -90, position: 'insideRight', style: { textAnchor: 'middle' } }}
+                label={{ value: 'Token数量 (K)', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle' } }}
               />
               <ChartTooltip
                 cursor={false}
                 content={
                   <ChartTooltipContent
                     labelFormatter={formatTooltipLabel}
-                    formatter={(value, name) => {
-                      if (name === "tokens") {
-                        return [`${value}K`, chartConfig[name as keyof typeof chartConfig]?.label || name]
-                      }
-                      return [value, chartConfig[name as keyof typeof chartConfig]?.label || name]
-                    }}
+                    formatter={(value, name) => [`${value}K`, chartConfig[name as keyof typeof chartConfig]?.label || name]}
                   />
                 }
               />
               <ChartLegend content={<ChartLegendContent />} />
               <Bar
-                yAxisId="left"
-                dataKey="reqs"
-                fill="var(--color-reqs)"
-                radius={[4, 4, 0, 0]}
-              />
-              <Bar
-                yAxisId="right"
                 dataKey="tokens"
                 fill="var(--color-tokens)"
                 radius={[4, 4, 0, 0]}

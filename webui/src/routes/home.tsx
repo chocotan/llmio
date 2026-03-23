@@ -7,15 +7,14 @@ import { Button } from "@/components/ui/button";
 import Loading from "@/components/loading";
 import {
   getMetrics,
-  getModelCounts,
+  getModelTokenUsages,
   getProjectCounts,
 } from "@/lib/api";
-import type { MetricsData, ModelCount, ProjectCount } from "@/lib/api";
+import type { MetricsData, ModelTokenUsage, ProjectCount } from "@/lib/api";
 import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
 
 // 懒加载图表组件
-const ChartPieDonutText = lazy(() => import("@/components/charts/pie-chart").then(module => ({ default: module.ChartPieDonutText })));
 const ModelRankingChart = lazy(() => import("@/components/charts/bar-chart").then(module => ({ default: module.ModelRankingChart })));
 const ProjectChartPieDonutText = lazy(() => import("@/components/charts/project-pie-chart").then(module => ({ default: module.ProjectChartPieDonutText })));
 const ProjectRankingChart = lazy(() => import("@/components/charts/project-bar-chart").then(module => ({ default: module.ProjectRankingChart })));
@@ -79,7 +78,8 @@ export default function Home() {
   // Real data from APIs
   const [todayMetrics, setTodayMetrics] = useState<MetricsData>({ reqs: 0, tokens: 0 });
   const [totalMetrics, setTotalMetrics] = useState<MetricsData>({ reqs: 0, tokens: 0 });
-  const [modelCounts, setModelCounts] = useState<ModelCount[]>([]);
+  const [modelTokens24h, setModelTokens24h] = useState<ModelTokenUsage[]>([]);
+  const [modelTokens7d, setModelTokens7d] = useState<ModelTokenUsage[]>([]);
   const [projectCounts, setProjectCounts] = useState<ProjectCount[]>([]);
 
   const { t } = useTranslation('home');
@@ -106,10 +106,21 @@ export default function Home() {
     }
   }, [t]);
 
-  const fetchModelCounts = useCallback(async () => {
+  const fetchModelTokens24h = useCallback(async () => {
     try {
-      const data = await getModelCounts();
-      setModelCounts(data);
+      const data = await getModelTokenUsages(24);
+      setModelTokens24h(data);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(t('errors.model_counts', { message }));
+      console.error(err);
+    }
+  }, [t]);
+
+  const fetchModelTokens7d = useCallback(async () => {
+    try {
+      const data = await getModelTokenUsages(24 * 7);
+      setModelTokens7d(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       toast.error(t('errors.model_counts', { message }));
@@ -130,9 +141,9 @@ export default function Home() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    await Promise.all([fetchTodayMetrics(), fetchTotalMetrics(), fetchModelCounts(), fetchProjectCounts()]);
+    await Promise.all([fetchTodayMetrics(), fetchTotalMetrics(), fetchModelTokens24h(), fetchModelTokens7d(), fetchProjectCounts()]);
     setLoading(false);
-  }, [fetchModelCounts, fetchProjectCounts, fetchTodayMetrics, fetchTotalMetrics]);
+  }, [fetchModelTokens24h, fetchModelTokens7d, fetchProjectCounts, fetchTodayMetrics, fetchTotalMetrics]);
 
   useEffect(() => {
     void load();
@@ -149,17 +160,7 @@ export default function Home() {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t('cards.today_requests')}</CardTitle>
-                  <CardDescription>{t('cards.today_requests_desc')}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <AnimatedCounter value={todayMetrics.reqs} />
-                </CardContent>
-              </Card>
-
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Card>
                 <CardHeader>
                   <CardTitle>{t('cards.today_tokens')}</CardTitle>
@@ -167,16 +168,6 @@ export default function Home() {
                 </CardHeader>
                 <CardContent>
                   <AnimatedCounter value={todayMetrics.tokens} />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t('cards.monthly_requests')}</CardTitle>
-                  <CardDescription>{t('cards.monthly_requests_desc')}</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <AnimatedCounter value={totalMetrics.reqs} />
                 </CardContent>
               </Card>
 
@@ -195,7 +186,7 @@ export default function Home() {
               <Suspense fallback={<div className="h-64 flex items-center justify-center">
                 <Loading message="加载图表..." />
               </div>}>
-                <MetricsChart title="统计图表" description="请求和Token使用趋势" />
+                <MetricsChart title="Token 统计图表" description="Token 使用趋势" />
               </Suspense>
             </div>
 
@@ -203,9 +194,12 @@ export default function Home() {
               <Suspense fallback={<div className="h-64 flex items-center justify-center">
                 <Loading message={t('loading_chart')} />
               </div>}>
-                <ChartPieDonutText data={modelCounts} />
+                <ModelRankingChart
+                  data={modelTokens24h}
+                  title="近 24 小时模型 Token 排行"
+                  description="展示近 24 小时 token 使用量最高的模型"
+                />
               </Suspense>
-
               <Suspense fallback={<div className="h-64 flex items-center justify-center">
                 <Loading message={t('loading_chart')} />
               </div>}>
@@ -217,9 +211,12 @@ export default function Home() {
               <Suspense fallback={<div className="h-64 flex items-center justify-center">
                 <Loading message={t('loading_chart')} />
               </div>}>
-                <ModelRankingChart data={modelCounts} />
+                <ModelRankingChart
+                  data={modelTokens7d}
+                  title="近 7 天模型 Token 排行"
+                  description="展示近 7 天 token 使用量最高的模型"
+                />
               </Suspense>
-
               <Suspense fallback={<div className="h-64 flex items-center justify-center">
                 <Loading message={t('loading_chart')} />
               </div>}>

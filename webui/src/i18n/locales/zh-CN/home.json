@@ -4,12 +4,8 @@
   "loading": "加载系统概览",
   "loading_chart": "加载图表...",
   "cards": {
-    "today_requests": "今日请求",
-    "today_requests_desc": "今日处理的请求总数",
     "today_tokens": "今日 Tokens",
     "today_tokens_desc": "今日处理的 Tokens 总数",
-    "monthly_requests": "本月请求",
-    "monthly_requests_desc": "最近30天处理的请求总数",
     "monthly_tokens": "本月 Tokens",
     "monthly_tokens_desc": "最近30天处理的 Tokens 总数"
   },

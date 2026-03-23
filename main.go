@@ -92,6 +92,7 @@ func main() {
 		api.GET("/metrics/daily/:days", handler.DailyMetrics)
 		api.GET("/metrics/hourly/:hours", handler.HourlyMetrics)
 		api.GET("/metrics/counts", handler.Counts)
+		api.GET("/metrics/model-tokens/:hours", handler.ModelTokenUsages)
 		api.GET("/metrics/projects", handler.ProjectCounts)
 		// Provider management
 		api.GET("/providers/template", handler.GetProviderTemplates)
