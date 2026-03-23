@@ -157,6 +157,11 @@ type Count struct {
 	Calls int64  `json:"calls"`
 }
 
+type ModelTokenUsage struct {
+	Model  string `json:"model"`
+	Tokens int64  `json:"tokens"`
+}
+
 func Counts(c *gin.Context) {
 	results := make([]Count, 0)
 	if err := models.DB.
@@ -179,6 +184,30 @@ func Counts(c *gin.Context) {
 			Calls: othersCalls,
 		}
 		results = append(results[:topN], othersCount)
+	}
+
+	common.Success(c, results)
+}
+
+func ModelTokenUsages(c *gin.Context) {
+	hours, err := strconv.Atoi(c.Param("hours"))
+	if err != nil || hours <= 0 {
+		common.BadRequest(c, "Invalid hours parameter")
+		return
+	}
+
+	results := make([]ModelTokenUsage, 0)
+	startTime := time.Now().Add(-time.Duration(hours) * time.Hour)
+	if err := models.DB.
+		Model(&models.ChatLog{}).
+		Select("name as model, COALESCE(SUM(total_tokens), 0) as tokens").
+		Where("created_at >= ?", startTime).
+		Group("name").
+		Order("tokens DESC, name ASC").
+		Limit(5).
+		Scan(&results).Error; err != nil {
+		common.InternalServerError(c, err.Error())
+		return
 	}
 
 	common.Success(c, results)
