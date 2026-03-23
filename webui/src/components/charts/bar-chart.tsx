@@ -5,6 +5,7 @@ import { Bar, BarChart, CartesianGrid, LabelList, XAxis, YAxis } from "recharts"
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
@@ -71,7 +72,7 @@ export function ModelRankingChart({ data, title, description }: ModelRankingChar
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
-        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+        {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="aspect-auto h-[320px] w-full">

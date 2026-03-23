@@ -203,7 +203,7 @@ func ModelTokenUsages(c *gin.Context) {
 		Select("name as model, COALESCE(SUM(total_tokens), 0) as tokens").
 		Where("created_at >= ?", startTime).
 		Group("name").
-		Order("tokens DESC, model ASC").
+		Order("tokens DESC, name ASC").
 		Limit(5).
 		Scan(&results).Error; err != nil {
 		common.InternalServerError(c, err.Error())

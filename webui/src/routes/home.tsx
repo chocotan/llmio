@@ -112,7 +112,7 @@ export default function Home() {
       setModelTokens24h(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(t('errors.model_counts', { message }));
+      toast.error(t('errors.model_tokens', { message }));
       console.error(err);
     }
   }, [t]);
@@ -123,7 +123,7 @@ export default function Home() {
       setModelTokens7d(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(t('errors.model_counts', { message }));
+      toast.error(t('errors.model_tokens', { message }));
       console.error(err);
     }
   }, [t]);
