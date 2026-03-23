@@ -42,12 +42,10 @@ type contextAwareDialer struct {
 }
 
 func (d *contextAwareDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
-	// Check if context is already done
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	// Use a channel to handle the dial operation with context
 	type result struct {
 		conn net.Conn
 		err  error
@@ -61,7 +59,6 @@ func (d *contextAwareDialer) DialContext(ctx context.Context, network, addr stri
 
 	select {
 	case <-ctx.Done():
-		// Context cancelled, return error
 		return nil, ctx.Err()
 	case r := <-resultChan:
 		return r.conn, r.err
@@ -94,7 +91,6 @@ func GetClientWithProxy(responseHeaderTimeout time.Duration, proxyURL string) *h
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
 
-	// Double-check after acquiring write lock
 	if client, exists := cache.clients[key]; exists {
 		return client
 	}
@@ -108,22 +104,18 @@ func GetClientWithProxy(responseHeaderTimeout time.Duration, proxyURL string) *h
 		ResponseHeaderTimeout: responseHeaderTimeout,
 	}
 
-	// Configure proxy if provided
 	if proxyURL != "" {
 		parsedURL, err := url.Parse(proxyURL)
 		if err == nil {
 			switch parsedURL.Scheme {
 			case "http", "https":
-				// HTTP proxy
 				transport.Proxy = http.ProxyURL(parsedURL)
 				transport.DialContext = dialer.DialContext
 			case "socks5":
-				// SOCKS5 proxy
 				var auth *proxy.Auth
 				if parsedURL.User != nil {
 					username := parsedURL.User.Username()
 					password, hasPassword := parsedURL.User.Password()
-					// Only create auth if we have actual credentials
 					if username != "" && hasPassword {
 						auth = &proxy.Auth{
 							User:     username,
@@ -134,34 +126,28 @@ func GetClientWithProxy(responseHeaderTimeout time.Duration, proxyURL string) *h
 
 				socks5Dialer, err := proxy.SOCKS5("tcp", parsedURL.Host, auth, dialer)
 				if err == nil {
-					// Use SOCKS5 dialer
-					// Note: SOCKS5 dialer doesn't support context, so we wrap it
 					contextDialer := &contextAwareDialer{dialer: socks5Dialer, baseDialer: dialer}
 					transport.DialContext = contextDialer.DialContext
 				} else {
-					// Fall back to no proxy on error
 					transport.Proxy = http.ProxyFromEnvironment
 					transport.DialContext = dialer.DialContext
 				}
 			default:
-				// Unknown scheme, fall back to environment proxy
 				transport.Proxy = http.ProxyFromEnvironment
 				transport.DialContext = dialer.DialContext
 			}
 		} else {
-			// Parse error, fall back to environment proxy
 			transport.Proxy = http.ProxyFromEnvironment
 			transport.DialContext = dialer.DialContext
 		}
 	} else {
-		// No proxy specified, use environment proxy
 		transport.Proxy = http.ProxyFromEnvironment
 		transport.DialContext = dialer.DialContext
 	}
 
 	client := &http.Client{
 		Transport: transport,
-		Timeout:   0, // No overall timeout, let ResponseHeaderTimeout control header timing
+		Timeout:   0,
 	}
 
 	cache.clients[key] = client

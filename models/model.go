@@ -4,15 +4,18 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/atopos31/llmio/consts"
 	"gorm.io/gorm"
 )
 
 type Provider struct {
 	gorm.Model
-	Name    string
-	Type    string
-	Config  string
-	Console string // 控制台地址
+	Name         string
+	Type         string
+	Config       string
+	Console      string // 控制台地址
+	Proxy        string // HTTP 代理地址
+	ErrorMatcher string // 响应体错误识别规则，多行或分号分隔 sample
 }
 
 type AnthropicConfig struct {
@@ -23,13 +26,14 @@ type AnthropicConfig struct {
 
 type Model struct {
 	gorm.Model
-	Name     string
-	Remark   string
-	MaxRetry int    // 重试次数限制
-	TimeOut  int    // 超时时间 单位秒
-	IOLog    *bool  // 是否记录IO
-	Strategy string // 负载均衡策略 默认 lottery
-	Breaker  *bool  // 是否开启熔断
+	Name         string
+	Remark       string
+	MaxRetry     int    // 重试次数限制
+	TimeOut      int    // 超时时间 单位秒
+	IOLog        *bool  // 是否记录IO
+	Strategy     string // 负载均衡策略 默认 lottery
+	Breaker      *bool  // 是否开启熔断
+	DisplayOrder int    // 模型展示顺序，值越大越靠前
 }
 
 type ModelWithProvider struct {
@@ -49,6 +53,7 @@ type ModelWithProvider struct {
 type ChatLog struct {
 	gorm.Model
 	Name          string `gorm:"index"`
+	TraceID       string `gorm:"index"`
 	ProviderModel string `gorm:"index"`
 	ProviderName  string `gorm:"index"`
 	Status        string `gorm:"index"` // error or success
@@ -70,7 +75,7 @@ type ChatLog struct {
 
 func (l ChatLog) WithError(err error) ChatLog {
 	l.Error = err.Error()
-	l.Status = "error"
+	l.Status = consts.StatusError
 	return l
 }
 

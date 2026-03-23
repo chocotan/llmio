@@ -8,6 +8,8 @@ export interface Provider {
   Type: string;
   Config: string;
   Console: string;
+  Proxy: string;
+  ErrorMatcher: string;
 }
 
 export interface Model {
@@ -19,6 +21,7 @@ export interface Model {
   IOLog: boolean;
   Strategy: string;
   Breaker?: boolean | null;
+  DisplayOrder?: number;
 }
 
 export interface ModelWithProvider {
@@ -143,6 +146,8 @@ export async function createProvider(provider: {
   type: string;
   config: string;
   console: string;
+  proxy: string;
+  error_matcher: string;
 }): Promise<Provider> {
   return apiRequest<Provider>('/providers', {
     method: 'POST',
@@ -155,6 +160,8 @@ export async function updateProvider(id: number, provider: {
   type?: string;
   config?: string;
   console?: string;
+  proxy?: string;
+  error_matcher?: string;
 }): Promise<Provider> {
   return apiRequest<Provider>(`/providers/${id}`, {
     method: 'PUT',
@@ -219,6 +226,13 @@ export async function updateModel(id: number, model: {
   return apiRequest<Model>(`/models/${id}`, {
     method: 'PUT',
     body: JSON.stringify(model),
+  });
+}
+
+export async function updateModelOrder(modelIds: number[]): Promise<{ updated: number }> {
+  return apiRequest<{ updated: number }>('/models/order', {
+    method: 'PATCH',
+    body: JSON.stringify({ model_ids: modelIds }),
   });
 }
 
@@ -411,8 +425,8 @@ export async function getProjectCounts(): Promise<ProjectCount[]> {
 }
 
 // Test API functions
-export async function testModelProvider(id: number): Promise<any> {
-  return apiRequest<any>(`/test/${id}`);
+export async function testModelProvider(id: number): Promise<unknown> {
+  return apiRequest<unknown>(`/test/${id}`);
 }
 
 // Provider Templates API functions
@@ -438,12 +452,6 @@ export async function getProviderModels(providerId: number): Promise<ProviderMod
 }
 
 // Config API functions
-export interface ConfigResponse {
-  key: string;
-  value: string;
-}
-
-// Config API functions
 export interface AnthropicCountTokens {
   base_url: string;
   api_key: string;
@@ -459,7 +467,7 @@ export const configAPI = {
   getConfig: (key: string) =>
     apiRequest<ConfigResponse>(`/config/${key}`),
 
-  updateConfig: (key: string, data: any) =>
+  updateConfig: (key: string, data: unknown) =>
     apiRequest<ConfigResponse>(`/config/${key}`, {
       method: 'PUT',
       body: JSON.stringify({ value: JSON.stringify(data) }),
@@ -471,6 +479,7 @@ export interface ChatLog {
   ID: number;
   CreatedAt: string;
   Name: string;
+  TraceID: string;
   ProviderModel: string;
   ProviderName: string;
   Status: string;
@@ -529,6 +538,7 @@ export async function getLogs(
     status?: string;
     style?: string;
     authKeyId?: string;
+    traceId?: string;
   } = {}
 ): Promise<LogsResponse> {
   const params = new URLSearchParams();
@@ -541,6 +551,7 @@ export async function getLogs(
   if (filters.status) params.append("status", filters.status);
   if (filters.style) params.append("style", filters.style);
   if (filters.authKeyId) params.append("auth_key_id", filters.authKeyId);
+  if (filters.traceId) params.append("trace_id", filters.traceId);
 
   return apiRequest<LogsResponse>(`/logs?${params.toString()}`);
 }

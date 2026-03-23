@@ -19,10 +19,12 @@ import (
 
 // ProviderRequest represents the request body for creating/updating a provider
 type ProviderRequest struct {
-	Name    string `json:"name"`
-	Type    string `json:"type"`
-	Config  string `json:"config"`
-	Console string `json:"console"`
+	Name         string `json:"name"`
+	Type         string `json:"type"`
+	Config       string `json:"config"`
+	Console      string `json:"console"`
+	Proxy        string `json:"proxy"`
+	ErrorMatcher string `json:"error_matcher"`
 }
 
 // ModelRequest represents the request body for creating/updating a model
@@ -34,6 +36,10 @@ type ModelRequest struct {
 	IOLog    bool   `json:"io_log"`
 	Strategy string `json:"strategy"`
 	Breaker  bool   `json:"breaker"`
+}
+
+type ModelOrderRequest struct {
+	ModelIDs []uint `json:"model_ids"`
 }
 
 // ModelWithProviderRequest represents the request body for creating/updating a model-provider association
@@ -101,7 +107,7 @@ func GetProviderModels(c *gin.Context) {
 		common.InternalServerError(c, err.Error())
 		return
 	}
-	chatModel, err := providers.New(provider.Type, provider.Config)
+	chatModel, err := providers.New(provider.Type, provider.Config, provider.Proxy)
 	if err != nil {
 		common.InternalServerError(c, "Failed to get models: "+err.Error())
 		return
@@ -135,10 +141,12 @@ func CreateProvider(c *gin.Context) {
 	}
 
 	provider := models.Provider{
-		Name:    req.Name,
-		Type:    req.Type,
-		Config:  req.Config,
-		Console: req.Console,
+		Name:         req.Name,
+		Type:         req.Type,
+		Config:       req.Config,
+		Console:      req.Console,
+		Proxy:        req.Proxy,
+		ErrorMatcher: req.ErrorMatcher,
 	}
 
 	if err := gorm.G[models.Provider](models.DB).Create(c.Request.Context(), &provider); err != nil {
@@ -176,10 +184,12 @@ func UpdateProvider(c *gin.Context) {
 
 	// Update fields
 	updates := models.Provider{
-		Name:    req.Name,
-		Type:    req.Type,
-		Config:  req.Config,
-		Console: req.Console,
+		Name:         req.Name,
+		Type:         req.Type,
+		Config:       req.Config,
+		Console:      req.Console,
+		Proxy:        req.Proxy,
+		ErrorMatcher: req.ErrorMatcher,
 	}
 
 	if _, err := gorm.G[models.Provider](models.DB).Where("id = ?", id).Updates(c.Request.Context(), updates); err != nil {
@@ -306,14 +316,23 @@ func CreateModel(c *gin.Context) {
 		strategy = consts.BalancerDefault
 	}
 
+	var maxDisplayOrder int
+	if err := models.DB.Model(&models.Model{}).
+		Select("COALESCE(MAX(display_order), 0)").
+		Scan(&maxDisplayOrder).Error; err != nil {
+		common.InternalServerError(c, "Failed to query model order: "+err.Error())
+		return
+	}
+
 	model := models.Model{
-		Name:     req.Name,
-		Remark:   req.Remark,
-		MaxRetry: req.MaxRetry,
-		TimeOut:  req.TimeOut,
-		IOLog:    &req.IOLog,
-		Strategy: strategy,
-		Breaker:  &req.Breaker,
+		Name:         req.Name,
+		Remark:       req.Remark,
+		MaxRetry:     req.MaxRetry,
+		TimeOut:      req.TimeOut,
+		IOLog:        &req.IOLog,
+		Strategy:     strategy,
+		Breaker:      &req.Breaker,
+		DisplayOrder: maxDisplayOrder + 1,
 	}
 
 	if err := gorm.G[models.Model](models.DB).Create(c.Request.Context(), &model); err != nil {
@@ -379,6 +398,63 @@ func UpdateModel(c *gin.Context) {
 	}
 
 	common.Success(c, updatedModel)
+}
+
+// UpdateModelOrder 更新模型展示顺序
+func UpdateModelOrder(c *gin.Context) {
+	var req ModelOrderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.BadRequest(c, "Invalid request body: "+err.Error())
+		return
+	}
+	if len(req.ModelIDs) == 0 {
+		common.BadRequest(c, "model_ids cannot be empty")
+		return
+	}
+
+	seen := make(map[uint]struct{}, len(req.ModelIDs))
+	modelIDs := make([]uint, 0, len(req.ModelIDs))
+	for _, modelID := range req.ModelIDs {
+		if modelID == 0 {
+			common.BadRequest(c, "model_ids contains invalid value 0")
+			return
+		}
+		if _, exists := seen[modelID]; exists {
+			common.BadRequest(c, fmt.Sprintf("duplicated model_id: %d", modelID))
+			return
+		}
+		seen[modelID] = struct{}{}
+		modelIDs = append(modelIDs, modelID)
+	}
+
+	var existCount int64
+	if err := models.DB.Model(&models.Model{}).Where("id IN ?", modelIDs).Count(&existCount).Error; err != nil {
+		common.InternalServerError(c, "Failed to validate models: "+err.Error())
+		return
+	}
+	if existCount != int64(len(modelIDs)) {
+		common.BadRequest(c, "model_ids contains non-existing model")
+		return
+	}
+
+	if err := models.DB.Transaction(func(tx *gorm.DB) error {
+		total := len(modelIDs)
+		for idx, modelID := range modelIDs {
+			order := total - idx
+			if err := tx.Model(&models.Model{}).
+				Where("id = ?", modelID).
+				Update("display_order", order).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		common.InternalServerError(c, "Failed to update model order: "+err.Error())
+		return
+	}
+
+	slog.Info("UpdateModelOrder", "count", len(modelIDs))
+	common.Success(c, map[string]any{"updated": len(modelIDs)})
 }
 
 // DeleteModel 删除模型
@@ -511,6 +587,7 @@ func GetModelProviderStatus(c *gin.Context) {
 		Where("provider_name = ?", provider.Name).
 		Where("provider_model = ?", providerModel).
 		Where("name = ?", modelName).
+		Where("status != ?", consts.StatusRunning).
 		Limit(10).
 		Order("created_at DESC").
 		Find(c.Request.Context())
@@ -521,7 +598,7 @@ func GetModelProviderStatus(c *gin.Context) {
 
 	status := make([]bool, 0)
 	for _, log := range logs {
-		status = append(status, log.Status == "success")
+		status = append(status, log.Status == consts.StatusSuccess)
 	}
 	slices.Reverse(status)
 	common.Success(c, status)
@@ -706,6 +783,7 @@ func GetRequestLogs(c *gin.Context) {
 	status := c.Query("status")
 	style := c.Query("style")
 	authKeyID := c.Query("auth_key_id")
+	traceID := c.Query("trace_id")
 
 	// 构建查询条件
 	query := models.DB.Model(&models.ChatLog{})
@@ -728,6 +806,10 @@ func GetRequestLogs(c *gin.Context) {
 
 	if authKeyID != "" {
 		query = query.Where("auth_key_id = ?", authKeyID)
+	}
+
+	if traceID != "" {
+		query = query.Where("trace_id = ?", traceID)
 	}
 
 	// 执行分页查询

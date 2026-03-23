@@ -1,0 +1,167 @@
+import { useTranslation } from "react-i18next";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
+type TestType = "connectivity" | "react";
+
+type ModelProviderTestDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onClose: () => void;
+  testType: TestType;
+  setTestType: (type: TestType) => void;
+  selectedTestId: number | null;
+  testResults: Record<number, { loading: boolean; result: any }>;
+  reactTestResult: {
+    loading: boolean;
+    messages: string;
+    success: boolean | null;
+    error: string | null;
+  };
+  executeTest: () => Promise<void>;
+};
+
+export function ModelProviderTestDialog({
+  open,
+  onOpenChange,
+  onClose,
+  testType,
+  setTestType,
+  selectedTestId,
+  testResults,
+  reactTestResult,
+  executeTest,
+}: ModelProviderTestDialogProps) {
+  const { t } = useTranslation('models');
+
+  const formatErrorText = (error: unknown) => {
+    if (!error) return "";
+    if (typeof error === "string") {
+      return error;
+    }
+    if (error instanceof Error) {
+      return error.message || String(error);
+    }
+    try {
+      return JSON.stringify(error, null, 2);
+    } catch {
+      return String(error);
+    }
+  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t('test_dialog.title')}</DialogTitle>
+          <DialogDescription>
+            {t('test_dialog.desc')}
+          </DialogDescription>
+        </DialogHeader>
+
+        <RadioGroup value={testType} onValueChange={(value: string) => setTestType(value as TestType)} className="space-y-4">
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="connectivity" id="connectivity" />
+              <Label htmlFor="connectivity">{t('test_dialog.connectivity')}</Label>
+            </div>
+            <p className="text-sm text-gray-500 ml-6">{t('test_dialog.connectivity_desc')}</p>
+
+            <div className="flex items-center space-x-2">
+              <RadioGroupItem value="react" id="react" />
+              <Label htmlFor="react">{t('test_dialog.react')}</Label>
+            </div>
+            <p className="text-sm text-gray-500 ml-6">{t('test_dialog.react_desc')}</p>
+        </RadioGroup>
+
+        {testType === "connectivity" && (
+          <div className="mt-4">
+            {selectedTestId && testResults[selectedTestId]?.loading ? (
+              <div className="flex items-center justify-center py-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                <span className="ml-2">{t('test_dialog.testing')}</span>
+              </div>
+            ) : selectedTestId && testResults[selectedTestId] ? (
+              testResults[selectedTestId].result?.error ? (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 max-w-full overflow-hidden">
+                  <p className="text-xs text-destructive uppercase tracking-wide mb-1">{t('test_dialog.error_title')}</p>
+                  <div className="text-destructive whitespace-pre-wrap break-all text-sm max-w-full">
+                    {formatErrorText(testResults[selectedTestId].result?.error)}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-md bg-green-100 text-green-800">
+                  <p>{t('test_dialog.test_success')}</p>
+                  {testResults[selectedTestId].result?.message && (
+                    <p className="mt-2 whitespace-pre-wrap break-words">{testResults[selectedTestId].result.message}</p>
+                  )}
+                </div>
+              )
+            ) : (
+              <p className="text-gray-500">{t('test_dialog.click_to_start')}</p>
+            )}
+          </div>
+        )}
+
+        {testType === "react" && (
+          <div className="mt-4 max-h-96 min-w-0">
+            {reactTestResult.loading ? (
+              <div className="flex items-center justify-center py-4">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+                <span className="ml-2">{t('test_dialog.testing')}</span>
+              </div>
+            ) : (
+              <>
+                {reactTestResult.error ? (
+                  <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 max-w-full overflow-hidden">
+                    <p className="text-xs text-destructive uppercase tracking-wide mb-1">{t('test_dialog.error_title')}</p>
+                    <div className="text-destructive whitespace-pre-wrap break-all text-sm max-w-full">
+                      {formatErrorText(reactTestResult.error)}
+                    </div>
+                  </div>
+                ) : reactTestResult.success !== null ? (
+                  <div className={`p-4 rounded-md ${reactTestResult.success ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                    <p>{reactTestResult.success ? t('test_dialog.test_success_excl') : t('test_dialog.test_failed')}</p>
+                  </div>
+                ) : null}
+              </>
+            )}
+
+            {reactTestResult.messages && (
+              <Textarea
+                name="logs"
+                className="mt-4 max-h-50 resize-none whitespace-pre overflow-x-auto"
+                readOnly
+                value={reactTestResult.messages}
+              />
+            )}
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {t('test_dialog.close')}
+          </Button>
+          <Button
+            onClick={executeTest}
+            disabled={testType === "connectivity"
+              ? (selectedTestId ? testResults[selectedTestId]?.loading : false)
+              : reactTestResult.loading}
+          >
+            {testType === "connectivity"
+              ? (selectedTestId && testResults[selectedTestId]?.loading ? t('test_dialog.testing') : t('test_dialog.execute'))
+              : (reactTestResult.loading ? t('test_dialog.testing') : t('test_dialog.execute'))}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

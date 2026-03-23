@@ -1,17 +1,20 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/atopos31/llmio/balancers"
 	"github.com/atopos31/llmio/consts"
 	"github.com/atopos31/llmio/models"
+	"github.com/atopos31/llmio/pkg/token"
 	"github.com/atopos31/llmio/providers"
 	"github.com/samber/lo"
 	"gorm.io/gorm"
@@ -22,13 +25,11 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 
 	providerMap := providersWithMeta.ProviderMap
 
-	// 收集重试过程中的err日志
 	retryLog := make(chan models.ChatLog, providersWithMeta.MaxRetry)
 	defer close(retryLog)
 
 	go RecordRetryLog(context.Background(), retryLog)
 
-	// 选择负载均衡策略
 	var balancer balancers.Balancer
 	switch providersWithMeta.Strategy {
 	case consts.BalancerLottery:
@@ -39,19 +40,21 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 		balancer = balancers.NewLottery(providersWithMeta.WeightItems)
 	}
 
-	// 是否开启熔断
 	if providersWithMeta.Breaker {
 		balancer = balancers.BalancerWrapperBreaker(balancer)
 	}
 
-	// 设置请求超时
 	responseHeaderTimeout := time.Second * time.Duration(providersWithMeta.TimeOut)
-	// 流式超时时间缩短
 	if before.Stream {
 		responseHeaderTimeout = responseHeaderTimeout / 3
 	}
 
 	authKeyID, _ := ctx.Value(consts.ContextKeyAuthKeyID).(uint)
+
+	traceID, err := token.GenerateRandomChars(10)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	timer := time.NewTimer(time.Second * time.Duration(providersWithMeta.TimeOut))
 	defer timer.Stop()
@@ -62,7 +65,6 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 		case <-timer.C:
 			return nil, nil, errors.New("retry time out")
 		default:
-			// 加权负载均衡
 			id, err := balancer.Pop()
 			if err != nil {
 				return nil, nil, err
@@ -70,30 +72,27 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 
 			modelWithProvider, ok := providersWithMeta.ModelWithProviderMap[id]
 			if !ok {
-				// 数据不一致，移除该模型避免下次重复命中
 				balancer.Delete(id)
 				continue
 			}
 
 			provider := providerMap[modelWithProvider.ProviderID]
 
-			chatModel, err := providers.New(provider.Type, provider.Config)
+			chatModel, err := providers.New(provider.Type, provider.Config, provider.Proxy)
 			if err != nil {
 				return nil, nil, err
 			}
 
-			// Get proxy-aware client for this specific provider
-			// Note: GetClientWithProxy caches clients by (timeout, proxy) key,
-			// so the same client is reused across retries with identical configuration
 			client := providers.GetClientWithProxy(responseHeaderTimeout, chatModel.GetProxy())
 
 			slog.Info("using provider", "provider", provider.Name, "model", modelWithProvider.ProviderModel)
 
 			log := models.ChatLog{
 				Name:          before.Model,
+				TraceID:       traceID,
 				ProviderModel: modelWithProvider.ProviderModel,
 				ProviderName:  provider.Name,
-				Status:        "success",
+				Status:        consts.StatusRunning,
 				Style:         style,
 				UserAgent:     reqMeta.UserAgent,
 				RemoteIP:      reqMeta.RemoteIP,
@@ -102,17 +101,12 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 				Retry:         retry,
 				ProxyTime:     time.Since(start),
 			}
-			// 根据请求原始请求头 是否透传请求头 自定义请求头 构建新的请求头
-			withHeader := false
-			if modelWithProvider.WithHeader != nil {
-				withHeader = *modelWithProvider.WithHeader
-			}
-			header := BuildHeaders(reqMeta.Header, withHeader, modelWithProvider.CustomerHeaders, before.Stream)
+			withHeader := lo.FromPtrOr(modelWithProvider.WithHeader, false)
+			headers := BuildHeaders(reqMeta.Header, withHeader, modelWithProvider.CustomerHeaders, before.Stream)
 
-			req, err := chatModel.BuildReq(ctx, header, modelWithProvider.ProviderModel, before.raw)
+			req, err := chatModel.BuildReq(ctx, headers, modelWithProvider.ProviderModel, before.raw)
 			if err != nil {
 				retryLog <- log.WithError(err)
-				// 构建请求失败 移除待选
 				balancer.Delete(id)
 				continue
 			}
@@ -120,7 +114,6 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 			res, err := client.Do(req)
 			if err != nil {
 				retryLog <- log.WithError(err)
-				// 请求失败 移除待选
 				balancer.Delete(id)
 				continue
 			}
@@ -133,14 +126,34 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 				retryLog <- log.WithError(fmt.Errorf("status: %d, body: %s", res.StatusCode, string(byteBody)))
 
 				if res.StatusCode == http.StatusTooManyRequests {
-					// 达到RPM限制 降低权重
 					balancer.Reduce(id)
 				} else {
-					// 非RPM限制 移除待选
 					balancer.Delete(id)
 				}
 				res.Body.Close()
 				continue
+			}
+
+			if provider.ErrorMatcher != "" {
+				contentType := strings.ToLower(res.Header.Get("Content-Type"))
+				if !strings.Contains(contentType, "text/event-stream") {
+					byteBody, err := io.ReadAll(res.Body)
+					if err != nil {
+						retryLog <- log.WithError(fmt.Errorf("read body failed: %w", err))
+						balancer.Delete(id)
+						res.Body.Close()
+						continue
+					}
+
+					if matched, sample := matchProviderBodyError(string(byteBody), provider.ErrorMatcher); matched {
+						retryLog <- log.WithError(fmt.Errorf("response matched provider error sample %q, body: %s", sample, string(byteBody)))
+						balancer.Delete(id)
+						res.Body.Close()
+						continue
+					}
+
+					res.Body = io.NopCloser(bytes.NewReader(byteBody))
+				}
 			}
 
 			balancer.Success(id)
@@ -149,7 +162,7 @@ func BalanceChat(ctx context.Context, start time.Time, style string, before Befo
 		}
 	}
 
-	return nil, nil, errors.New("maximum retry attempts reached")
+	return nil, nil, fmt.Errorf("All retry failed, trace ID: %s", traceID)
 }
 
 func RecordRetryLog(ctx context.Context, retryLog chan models.ChatLog) {
@@ -175,6 +188,7 @@ func RecordLog(ctx context.Context, reqStart time.Time, reader io.ReadCloser, pr
 		if err != nil {
 			return err
 		}
+		log.Status = consts.StatusSuccess
 		if _, err := gorm.G[models.ChatLog](models.DB).Where("id = ?", logId).Updates(ctx, *log); err != nil {
 			return err
 		}
@@ -186,7 +200,12 @@ func RecordLog(ctx context.Context, reqStart time.Time, reader io.ReadCloser, pr
 		return nil
 	}
 	if err := recordFunc(); err != nil {
-		slog.Error("record log error", "error", err)
+		if _, err := gorm.G[models.ChatLog](models.DB).Where("id = ?", logId).Updates(ctx, models.ChatLog{
+			Status: consts.StatusError,
+			Error:  err.Error(),
+		}); err != nil {
+			slog.Error("record log error", "error", err)
+		}
 	}
 }
 
@@ -225,8 +244,8 @@ type ProvidersWithMeta struct {
 	MaxRetry             int
 	TimeOut              int
 	IOLog                bool
-	Strategy             string // 负载均衡策略
-	Breaker              bool   // 是否开启熔断
+	Strategy             string
+	Breaker              bool
 }
 
 func ProvidersWithMetaBymodelsName(ctx context.Context, style string, before Before) (*ProvidersWithMeta, error) {
@@ -235,7 +254,7 @@ func ProvidersWithMetaBymodelsName(ctx context.Context, style string, before Bef
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			if _, err := SaveChatLog(ctx, models.ChatLog{
 				Name:   before.Model,
-				Status: "error",
+				Status: consts.StatusError,
 				Style:  style,
 				Error:  err.Error(),
 			}); err != nil {
@@ -289,23 +308,14 @@ func ProvidersWithMetaBymodelsName(ctx context.Context, style string, before Bef
 		weightItems[mp.ID] = mp.Weight
 	}
 
-	if model.IOLog == nil {
-		model.IOLog = new(bool)
-	}
-
-	breaker := false
-	if model.Breaker != nil {
-		breaker = *model.Breaker
-	}
-
 	return &ProvidersWithMeta{
 		ModelWithProviderMap: modelWithProviderMap,
 		WeightItems:          weightItems,
 		ProviderMap:          providerMap,
 		MaxRetry:             model.MaxRetry,
 		TimeOut:              model.TimeOut,
-		IOLog:                *model.IOLog,
+		IOLog:                lo.FromPtrOr(model.IOLog, false),
 		Strategy:             model.Strategy,
-		Breaker:              breaker,
+		Breaker:              lo.FromPtrOr(model.Breaker, false),
 	}, nil
 }

@@ -1,17 +1,10 @@
-import { useState, useEffect, useRef, type ReactNode } from "react";
+import { useState, useEffect, useCallback, type DragEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useFieldArray, useForm } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +13,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
+} from "@/components/ui/table";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,44 +42,40 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
+import { Checkbox } from "@/components/ui/checkbox";
 import Loading from "@/components/loading";
 import {
   getModelProviders,
   getModelProviderStatus,
-  createModelProvider,
-  updateModelProvider,
   updateModelProviderStatus,
   deleteModelProvider,
+  deleteModel,
+  createModel,
   getModelOptions,
+  updateModel,
   getProviders,
   getProviderModels,
-  testModelProvider
+  updateModelOrder
 } from "@/lib/api";
 import type { ModelWithProvider, Model, Provider, ProviderModel } from "@/lib/api";
-import { fetchEventSource } from "@microsoft/fetch-event-source";
-import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { RefreshCw, Pencil, Trash2, Zap } from "lucide-react";
+import { ArrowLeft, RefreshCw, Pencil, Trash2, Zap, Search, Link, ListCollapse } from "lucide-react";
 import { Spinner } from "@/components/ui/spinner";
+import { useModelProviderForm } from "@/routes/model-providers/use-model-provider-form";
+import { useModelProviderTesting } from "@/routes/model-providers/use-model-provider-testing";
+import { ModelProviderFormDialog } from "@/routes/model-providers/model-provider-form-dialog";
+import { ModelProviderTestDialog } from "@/routes/model-providers/model-provider-test-dialog";
 
 type MobileInfoItemProps = {
   label: string;
   value: ReactNode;
 };
+
+type StrategyFilter = "all" | "lottery" | "rotor";
+type IOLogFilter = "all" | "true" | "false";
 
 const MobileInfoItem = ({ label, value }: MobileInfoItemProps) => (
   <div className="space-y-1">
@@ -77,164 +84,125 @@ const MobileInfoItem = ({ label, value }: MobileInfoItemProps) => (
   </div>
 );
 
-// 定义表单验证模式
-const headerPairSchema = z.object({
-  key: z.string().min(1, { message: "请求头键不能为空" }),
-  value: z.string().default(""),
-});
+const renderStrategy = (strategy?: string) =>
+  strategy === "rotor" ? "Rotor" : "Lottery";
 
-const formSchema = z.object({
-  model_id: z.number().positive({ message: "模型ID必须大于0" }),
-  provider_name: z.string().min(1, { message: "提供商模型名称不能为空" }),
-  provider_id: z.number().positive({ message: "提供商ID必须大于0" }),
-  tool_call: z.boolean(),
-  structured_output: z.boolean(),
-  image: z.boolean(),
-  with_header: z.boolean(),
-  weight: z.number().positive({ message: "权重必须大于0" }),
-  customer_headers: z.array(headerPairSchema).default([]),
+const modelEditSchema = z.object({
+  name: z.string().min(1, { message: "模型名称不能为空" }),
+  remark: z.string(),
+  max_retry: z.number().min(0, { message: "重试次数限制不能为负数" }),
+  time_out: z.number().min(0, { message: "超时时间不能为负数" }),
+  io_log: z.boolean(),
+  strategy: z.enum(["lottery", "rotor"]),
+  breaker: z.boolean(),
 });
-
-type FormValues = z.input<typeof formSchema>;
 
 export default function ModelProvidersPage() {
+  const { t } = useTranslation(['models', 'common']);
   const [modelProviders, setModelProviders] = useState<ModelWithProvider[]>([]);
   const [models, setModels] = useState<Model[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [providerModelsMap, setProviderModelsMap] = useState<Record<number, ProviderModel[]>>({});
   const [providerModelsLoading, setProviderModelsLoading] = useState<Record<number, boolean>>({});
-  const [showProviderModels, setShowProviderModels] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const [providerStatus, setProviderStatus] = useState<Record<number, boolean[]>>({});
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
-  const [editingAssociation, setEditingAssociation] = useState<ModelWithProvider | null>(null);
   const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
-  const [testResults, setTestResults] = useState<Record<number, { loading: boolean; result: any }>>({});
-  const [testDialogOpen, setTestDialogOpen] = useState(false);
-  const [selectedTestId, setSelectedTestId] = useState<number | null>(null);
-  const [testType, setTestType] = useState<"connectivity" | "react">("connectivity");
   const [selectedProviderType, setSelectedProviderType] = useState<string>("all");
-  const [weightSortOrder, setWeightSortOrder] = useState<"asc" | "desc" | "none">("none");
-  const [reactTestResult, setReactTestResult] = useState<{
-    loading: boolean;
-    messages: string;
-    success: boolean | null;
-    error: string | null;
-  }>({
-    loading: false,
-    messages: "",
-    success: null,
-    error: null
-  });
+  const [providerSearchInput, setProviderSearchInput] = useState("");
+  const [providerSearchTerm, setProviderSearchTerm] = useState("");
+  const [weightSortOrder, setWeightSortOrder] = useState<"asc" | "desc" | "none">("desc");
   const [statusUpdating, setStatusUpdating] = useState<Record<number, boolean>>({});
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [orderedCardModels, setOrderedCardModels] = useState<Model[]>([]);
+  const [draggingModelId, setDraggingModelId] = useState<number | null>(null);
+  const [dragOverModelId, setDragOverModelId] = useState<number | null>(null);
+  const [cardOrderSaving, setCardOrderSaving] = useState(false);
+  const [suppressCardClick, setSuppressCardClick] = useState(false);
+  const [modelAssociationCountMap, setModelAssociationCountMap] = useState<Record<number, number>>({});
+  const [modelAssociationCountLoading, setModelAssociationCountLoading] = useState(false);
+  const [modelEditOpen, setModelEditOpen] = useState(false);
+  const [editingModel, setEditingModel] = useState<Model | null>(null);
+  const [modelEditSaving, setModelEditSaving] = useState(false);
+  const [modelDeleteId, setModelDeleteId] = useState<number | null>(null);
+  const [modelDeleteLoading, setModelDeleteLoading] = useState(false);
+  const [modelSearchInput, setModelSearchInput] = useState("");
+  const [modelSearchTerm, setModelSearchTerm] = useState("");
+  const [modelStrategyFilter, setModelStrategyFilter] = useState<StrategyFilter>("all");
+  const [modelIOLogFilter, setModelIOLogFilter] = useState<IOLogFilter>("all");
 
-  const dialogClose = () => {
-    setTestDialogOpen(false)
-  };
-
-  // 初始化表单
-  const form = useForm<FormValues>({
-    resolver: zodResolver(formSchema),
+  const modelEditForm = useForm<z.infer<typeof modelEditSchema>>({
+    resolver: zodResolver(modelEditSchema),
     defaultValues: {
-      model_id: 0,
-      provider_name: "",
-      provider_id: 0,
-      tool_call: true,
-      structured_output: true,
-      image: false,
-      with_header: true,
-      weight: 1,
-      customer_headers: [],
+      name: "",
+      remark: "",
+      max_retry: 10,
+      time_out: 60,
+      io_log: false,
+      strategy: "lottery",
+      breaker: false,
     },
   });
-  const { fields: headerFields, append: appendHeader, remove: removeHeader } = useFieldArray({
-    control: form.control,
-    name: "customer_headers",
-  });
 
-  useEffect(() => {
-    Promise.all([fetchModels(), fetchProviders()]).finally(() => {
-      setLoading(false);
+  const loadProviderModels = useCallback(async (providerId: number, force = false) => {
+    if (!providerId) return;
+    if (!force && providerModelsMap[providerId]) return;
+
+    setProviderModelsLoading((prev) => ({ ...prev, [providerId]: true }));
+    try {
+      const data = await getProviderModels(providerId);
+      setProviderModelsMap((prev) => ({ ...prev, [providerId]: data }));
+    } catch (err) {
+      toast.warning(`获取提供商: ${providers.find((e) => e.ID === providerId)?.Name} 模型列表失败, 请手动填写提供商模型\n${err}`);
+      setProviderModelsMap((prev) => ({ ...prev, [providerId]: [] }));
+    } finally {
+      setProviderModelsLoading((prev) => {
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+    }
+  }, [providerModelsMap, providers]);
+
+  const sortCardModels = useCallback((modelList: Model[]) => {
+    return [...modelList].sort((a, b) => {
+      const orderA = a.DisplayOrder ?? 0;
+      const orderB = b.DisplayOrder ?? 0;
+      if (orderA !== orderB) return orderB - orderA;
+      return b.ID - a.ID;
     });
   }, []);
 
-  useEffect(() => {
-    if (models.length === 0) {
-      if (selectedModelId !== null) {
-        setSelectedModelId(null);
-        form.setValue("model_id", 0);
-      }
-      return;
-    }
+  const reorderCardModels = useCallback((modelList: Model[], sourceId: number, targetId: number) => {
+    if (sourceId === targetId) return modelList;
+    const sourceIndex = modelList.findIndex((item) => item.ID === sourceId);
+    const targetIndex = modelList.findIndex((item) => item.ID === targetId);
+    if (sourceIndex === -1 || targetIndex === -1) return modelList;
+    if (sourceIndex === targetIndex) return modelList;
 
-    const modelIdParam = searchParams.get("modelId");
-    const parsedParam = modelIdParam ? Number(modelIdParam) : NaN;
-
-    if (!Number.isNaN(parsedParam) && models.some(model => model.ID === parsedParam)) {
-      if (selectedModelId !== parsedParam) {
-        setSelectedModelId(parsedParam);
-        form.setValue("model_id", parsedParam);
-      }
-      return;
-    }
-
-    const fallbackId = models[0].ID;
-    if (selectedModelId !== fallbackId) {
-      setSelectedModelId(fallbackId);
-      form.setValue("model_id", fallbackId);
-    }
-    if (modelIdParam !== fallbackId.toString()) {
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("modelId", fallbackId.toString());
-      setSearchParams(nextParams, { replace: true });
-    }
-  }, [models, searchParams, form, setSearchParams]);
+    const next = [...modelList];
+    const [moved] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    return next;
+  }, []);
 
   useEffect(() => {
-    if (selectedModelId) {
-      fetchModelProviders(selectedModelId);
-    }
-  }, [selectedModelId]);
+    setOrderedCardModels(sortCardModels(models));
+  }, [models, sortCardModels]);
 
-  const buildPayload = (values: FormValues) => {
-    const headers: Record<string, string> = {};
-    (values.customer_headers || []).forEach(({ key, value }) => {
-      const trimmedKey = key.trim();
-      if (trimmedKey) {
-        headers[trimmedKey] = value ?? "";
-      }
-    });
-
-    return {
-      model_id: values.model_id,
-      provider_name: values.provider_name,
-      provider_id: values.provider_id,
-      tool_call: values.tool_call,
-      structured_output: values.structured_output,
-      image: values.image,
-      with_header: values.with_header,
-      customer_headers: headers,
-      weight: values.weight
-    };
-  };
-
-  const getDefaultFormValues = (overrideModelId?: number): FormValues => {
-    const fallbackModelId = overrideModelId ?? selectedModelId ?? models[0]?.ID ?? 0;
-    return {
-      model_id: fallbackModelId,
-      provider_name: "",
-      provider_id: 0,
-      tool_call: false,
-      structured_output: false,
-      image: false,
-      with_header: false,
-      weight: 1,
-      customer_headers: []
-    };
-  };
+  const {
+    testResults,
+    testDialogOpen,
+    setTestDialogOpen,
+    selectedTestId,
+    testType,
+    setTestType,
+    reactTestResult,
+    openTestDialog,
+    closeTestDialog,
+    executeTest,
+  } = useModelProviderTesting();
 
   const fetchModels = async () => {
     try {
@@ -242,7 +210,7 @@ export default function ModelProvidersPage() {
       setModels(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(`获取模型列表失败: ${message}`);
+      toast.error(t('toast.fetch_models_failed', { message }));
       console.error(err);
     }
   };
@@ -253,34 +221,15 @@ export default function ModelProvidersPage() {
       setProviders(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(`获取提供商列表失败: ${message}`);
+      toast.error(t('toast.fetch_providers_failed', { message }));
       console.error(err);
     }
   };
 
-  const fetchModelProviders = async (modelId: number) => {
-    try {
-      setLoading(true);
-      const data = await getModelProviders(modelId);
-      setModelProviders(data.map(item => ({
-        ...item,
-        CustomerHeaders: item.CustomerHeaders || {}
-      })));
-      // 异步加载状态数据
-      loadProviderStatus(data, modelId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(`获取关联管理列表失败: ${message}`);
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadProviderStatus = async (providers: ModelWithProvider[], modelId: number) => {
+  const loadProviderStatus = useCallback(async (providers: ModelWithProvider[], modelId: number) => {
     const selectedModel = models.find(m => m.ID === modelId);
     if (!selectedModel) return;
-    setProviderStatus([])
+    setProviderStatus({})
 
     const newStatus: Record<number, boolean[]> = {};
 
@@ -302,62 +251,172 @@ export default function ModelProvidersPage() {
     );
 
     setProviderStatus(newStatus);
-  };
+  }, [models]);
 
-  const handleCreate = async (values: FormValues) => {
+  const fetchModelProviders = useCallback(async (modelId: number) => {
     try {
-      await createModelProvider(buildPayload(values));
-      setOpen(false);
-      toast.success("关联管理创建成功");
-      form.reset(getDefaultFormValues());
-      if (selectedModelId) {
-        fetchModelProviders(selectedModelId);
-      }
+      setLoading(true);
+      const data = await getModelProviders(modelId);
+      setModelProviders(data.map(item => ({
+        ...item,
+        CustomerHeaders: item.CustomerHeaders || {}
+      })));
+      setModelAssociationCountMap((prev) => ({ ...prev, [modelId]: data.length }));
+      // 异步加载状态数据
+      loadProviderStatus(data, modelId);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(`创建关联管理失败: ${message}`);
+      toast.error(`获取关联管理列表失败: ${message}`);
       console.error(err);
-    }
-  };
-
-  const loadProviderModels = async (providerId: number, force = false) => {
-    if (!providerId) return;
-    if (!force && providerModelsMap[providerId]) return;
-
-    setProviderModelsLoading(prev => ({ ...prev, [providerId]: true }));
-    try {
-      const data = await getProviderModels(providerId);
-      setProviderModelsMap(prev => ({ ...prev, [providerId]: data }));
-    } catch (err) {
-      toast.warning(`获取提供商: ${providers.find(e => e.ID === providerId)?.Name} 模型列表失败, 请手动填写提供商模型\n${err}`);
-      setProviderModelsMap(prev => ({ ...prev, [providerId]: [] }));
     } finally {
-      setProviderModelsLoading(prev => {
-        const next = { ...prev };
-        delete next[providerId];
-        return next;
-      });
+      setLoading(false);
     }
-  };
+  }, [loadProviderStatus]);
 
-  const handleUpdate = async (values: FormValues) => {
-    if (!editingAssociation) return;
-
+  const refreshModelAssociationCount = useCallback(async (modelId: number) => {
     try {
-      await updateModelProvider(editingAssociation.ID, buildPayload(values));
-      setOpen(false);
-      toast.success("关联管理更新成功");
-      setEditingAssociation(null);
-      form.reset(getDefaultFormValues());
-      if (selectedModelId) {
-        fetchModelProviders(selectedModelId);
-      }
+      const associations = await getModelProviders(modelId);
+      setModelAssociationCountMap((prev) => ({ ...prev, [modelId]: associations.length }));
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      toast.error(`更新关联管理失败: ${message}`);
-      console.error(err);
+      console.error(`Failed to refresh association count for model ${modelId}:`, err);
+      setModelAssociationCountMap((prev) => ({ ...prev, [modelId]: -1 }));
     }
-  };
+  }, []);
+
+  const {
+    form,
+    open,
+    setOpen,
+    editingAssociation,
+    showProviderModels,
+    setShowProviderModels,
+    headerFields,
+    appendHeader,
+    removeHeader,
+    selectedProviderId,
+    openEditDialog,
+    openCreateDialog,
+    submit,
+    sortProviderModels,
+  } = useModelProviderForm({
+    selectedModelId,
+    models,
+    providerModelsMap,
+    loadProviderModels,
+    onReload: async (modelId) => {
+      if (selectedModelId) {
+        await fetchModelProviders(selectedModelId);
+        return;
+      }
+      await refreshModelAssociationCount(modelId);
+    },
+  });
+
+  useEffect(() => {
+    Promise.all([fetchModels(), fetchProviders()]).finally(() => {
+      setLoading(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (models.length === 0) {
+      if (selectedModelId !== null) {
+        setSelectedModelId(null);
+        form.setValue("model_id", 0);
+      }
+      return;
+    }
+
+    const modelIdParam = searchParams.get("modelId");
+    if (!modelIdParam) {
+      if (selectedModelId !== null) {
+        setSelectedModelId(null);
+        form.setValue("model_id", 0);
+      }
+      return;
+    }
+
+    const parsedParam = Number(modelIdParam);
+    if (!Number.isNaN(parsedParam) && models.some((model) => model.ID === parsedParam)) {
+      if (selectedModelId !== parsedParam) {
+        setSelectedModelId(parsedParam);
+        form.setValue("model_id", parsedParam);
+      }
+      return;
+    }
+
+    if (selectedModelId !== null) {
+      setSelectedModelId(null);
+      form.setValue("model_id", 0);
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("modelId");
+    setSearchParams(nextParams, { replace: true });
+  }, [models, searchParams, form, selectedModelId, setSearchParams]);
+
+  useEffect(() => {
+    if (selectedModelId) {
+      fetchModelProviders(selectedModelId);
+    }
+  }, [selectedModelId, fetchModelProviders]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setModelSearchTerm(modelSearchInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [modelSearchInput]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setProviderSearchTerm(providerSearchInput.trim().toLowerCase());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [providerSearchInput]);
+
+  useEffect(() => {
+    if (models.length === 0) {
+      setModelAssociationCountMap({});
+      setModelAssociationCountLoading(false);
+      return;
+    }
+    if (selectedModelId !== null) return;
+
+    let active = true;
+    setModelAssociationCountLoading(true);
+
+    const loadAssociationCounts = async () => {
+      const entries = await Promise.all(
+        models.map(async (model) => {
+          try {
+            const associations = await getModelProviders(model.ID);
+            return [model.ID, associations.length] as const;
+          } catch (err) {
+            console.error(`Failed to load association count for model ${model.ID}:`, err);
+            return [model.ID, -1] as const;
+          }
+        })
+      );
+
+      if (!active) return;
+      const nextCountMap: Record<number, number> = {};
+      entries.forEach(([modelId, count]) => {
+        nextCountMap[modelId] = count;
+      });
+      setModelAssociationCountMap(nextCountMap);
+      setModelAssociationCountLoading(false);
+    };
+
+    loadAssociationCounts().catch((err) => {
+      if (!active) return;
+      console.error("Failed to load model association counts:", err);
+      setModelAssociationCountLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [models, selectedModelId]);
 
   const handleDelete = async () => {
     if (!deleteId) return;
@@ -370,7 +429,7 @@ export default function ModelProvidersPage() {
       toast.success("关联管理删除成功");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast.error(`删除关联管理失败: ${message}`);
+      toast.error(t('toast.association_delete_failed', { message }));
       console.error(err);
     }
   };
@@ -410,218 +469,218 @@ export default function ModelProvidersPage() {
     }
   };
 
-  const handleTest = (id: number) => {
-    currentControllerRef.current?.abort(); // 取消之前的请求
-    setSelectedTestId(id);
-    setTestType("connectivity");
-    setTestDialogOpen(true);
-    setReactTestResult({
-      loading: false,
-      messages: "",
-      success: null,
-      error: null
-    });
-  };
-
-  const handleConnectivityTest = async (id: number) => {
-    try {
-      setTestResults(prev => ({
-        ...prev,
-        [id]: { loading: true, result: null }
-      }));
-
-      const result = await testModelProvider(id);
-      setTestResults(prev => ({
-        ...prev,
-        [id]: { loading: false, result }
-      }));
-      return result;
-    } catch (err) {
-      setTestResults(prev => ({
-        ...prev,
-        [id]: { loading: false, result: { error: "测试失败" + err } }
-      }));
-      console.error(err);
-      return { error: "测试失败" + err };
-    }
-  };
-
-
-  const currentControllerRef = useRef<AbortController | null>(null);
-  const handleReactTest = async (id: number) => {
-    setReactTestResult(prev => ({
-      ...prev,
-      messages: "",
-      loading: true,
-    }));
-    try {
-      const token = localStorage.getItem("authToken");
-      const controller = new AbortController();
-      currentControllerRef.current = controller;
-      await fetchEventSource(`/api/test/react/${id}`, {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-        },
-        signal: controller.signal,
-        onmessage(event) {
-          setReactTestResult(prev => {
-            if (event.event === "start") {
-              return {
-                ...prev,
-                messages: prev.messages + `[开始测试] ${event.data}\n`
-              };
-            } else if (event.event === "toolcall") {
-              return {
-                ...prev,
-                messages: prev.messages + `\n[调用工具] ${event.data}\n`
-              };
-            } else if (event.event === "toolres") {
-              return {
-                ...prev,
-                messages: prev.messages + `\n[工具输出] ${event.data}\n`
-              };
-            }
-            else if (event.event === "message") {
-              if (event.data.trim()) {
-                return {
-                  ...prev,
-                  messages: prev.messages + `${event.data}`
-                };
-              }
-            } else if (event.event === "error") {
-              return {
-                ...prev,
-                success: false,
-                messages: prev.messages + `\n[错误] ${event.data}\n`
-              };
-            } else if (event.event === "success") {
-              return {
-                ...prev,
-                success: true,
-                messages: prev.messages + `\n[成功] ${event.data}`
-              };
-            }
-            return prev;
-          });
-        },
-        onclose() {
-          setReactTestResult(prev => {
-            return {
-              ...prev,
-              loading: false,
-            };
-          });
-        },
-        onerror(err) {
-          setReactTestResult(prev => {
-            return {
-              ...prev,
-              loading: false,
-              error: err.message || "测试过程中发生错误",
-              success: false
-            };
-          });
-          throw err;
-        }
-      });
-    } catch (err) {
-      setReactTestResult(prev => ({
-        ...prev,
-        loading: false,
-        error: "测试失败",
-        success: false
-      }));
-      console.error(err);
-    }
-  };
-
-  const executeTest = async () => {
-    if (!selectedTestId) return;
-
-    if (testType === "connectivity") {
-      await handleConnectivityTest(selectedTestId);
-    } else {
-      await handleReactTest(selectedTestId);
-    }
-  };
-
-  const openEditDialog = (association: ModelWithProvider) => {
-    setEditingAssociation(association);
-    const headerPairs = Object.entries(association.CustomerHeaders || {}).map(([key, value]) => ({
-      key,
-      value,
-    }));
-    form.reset({
-      model_id: association.ModelID,
-      provider_name: association.ProviderModel,
-      provider_id: association.ProviderID,
-      tool_call: association.ToolCall,
-      structured_output: association.StructuredOutput,
-      image: association.Image,
-      with_header: association.WithHeader,
-      weight: association.Weight,
-      customer_headers: headerPairs.length ? headerPairs : [],
-    });
-    setOpen(true);
-  };
-
-  const openCreateDialog = () => {
-    setEditingAssociation(null);
-    form.reset(getDefaultFormValues());
-    setOpen(true);
-  };
-
   const openDeleteDialog = (id: number) => {
     setDeleteId(id);
   };
 
-  const handleModelChange = (modelId: string) => {
-    const id = parseInt(modelId);
-    setSelectedModelId(id);
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.set("modelId", id.toString());
-    setSearchParams(nextParams);
-    form.setValue("model_id", id);
+  const persistCardOrder = async (nextOrderedModels: Model[]) => {
+    const nextModelIds = nextOrderedModels.map((model) => model.ID);
+    const currentModelIds = sortCardModels(models).map((model) => model.ID);
+    if (nextModelIds.join(",") === currentModelIds.join(",")) return;
+
+    setCardOrderSaving(true);
+    try {
+      await updateModelOrder(nextModelIds);
+
+      const total = nextOrderedModels.length;
+      const nextOrderMap = new Map<number, number>();
+      nextOrderedModels.forEach((model, index) => {
+        nextOrderMap.set(model.ID, total - index);
+      });
+
+      setModels((prev) =>
+        prev.map((model) => ({
+          ...model,
+          DisplayOrder: nextOrderMap.get(model.ID) ?? model.DisplayOrder ?? 0,
+        }))
+      );
+      toast.success("模型排序已保存");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(t('toast.order_save_failed', { message }));
+      setOrderedCardModels(sortCardModels(models));
+    } finally {
+      setCardOrderSaving(false);
+    }
   };
 
-  const selectedProviderId = form.watch("provider_id");
-
-  useEffect(() => {
-    if (selectedProviderId && selectedProviderId > 0) {
-      loadProviderModels(selectedProviderId);
+  const handleCardDragStart = (event: DragEvent<HTMLElement>, modelId: number) => {
+    if (cardOrderSaving || hasModelOverviewFilter) {
+      event.preventDefault();
+      return;
     }
-    setShowProviderModels(false);
-  }, [selectedProviderId]);
+    setDraggingModelId(modelId);
+    setDragOverModelId(null);
+    setSuppressCardClick(true);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", modelId.toString());
+  };
 
-  const sortProviderModels = (providerId: number, query: string): ProviderModel[] => {
-    const models = providerModelsMap[providerId] || [];
-    if (!query) return models;
+  const handleCardDragOver = (event: DragEvent<HTMLElement>, targetModelId: number) => {
+    if (hasModelOverviewFilter) return;
+    event.preventDefault();
+    if (draggingModelId === null || draggingModelId === targetModelId) return;
+    setDragOverModelId(targetModelId);
+    setOrderedCardModels((prev) => reorderCardModels(prev, draggingModelId, targetModelId));
+  };
 
-    const normalized = query.toLowerCase();
-    const score = (id: string) => {
-      const val = id.toLowerCase();
-      if (val === normalized) return 1000;
-      let s = 0;
-      if (val.startsWith(normalized)) s += 500;
-      if (val.includes(normalized)) s += 200;
-      s -= Math.abs(val.length - normalized.length);
-      return s;
-    };
+  const handleCardDrop = async (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    setDraggingModelId(null);
+    setDragOverModelId(null);
+    if (hasModelOverviewFilter) return;
+    await persistCardOrder(orderedCardModels);
+  };
 
-    return [...models].sort((a, b) => score(b.id) - score(a.id));
+  const handleCardDragEnd = () => {
+    setDraggingModelId(null);
+    setDragOverModelId(null);
+    setTimeout(() => setSuppressCardClick(false), 0);
+  };
+
+  const openModelEditDialog = (model: Model) => {
+    setEditingModel(model);
+    modelEditForm.reset({
+      name: model.Name,
+      remark: model.Remark ?? "",
+      max_retry: model.MaxRetry,
+      time_out: model.TimeOut,
+      io_log: !!model.IOLog,
+      strategy: model.Strategy === "rotor" ? "rotor" : "lottery",
+      breaker: model.Breaker ?? false,
+    });
+    setModelEditOpen(true);
+  };
+
+  const openModelCreateDialog = () => {
+    setEditingModel(null);
+    modelEditForm.reset({
+      name: "",
+      remark: "",
+      max_retry: 10,
+      time_out: 60,
+      io_log: false,
+      strategy: "lottery",
+      breaker: false,
+    });
+    setModelEditOpen(true);
+  };
+
+  const closeModelEditDialog = () => {
+    setModelEditOpen(false);
+    setEditingModel(null);
+    modelEditForm.reset({
+      name: "",
+      remark: "",
+      max_retry: 10,
+      time_out: 60,
+      io_log: false,
+      strategy: "lottery",
+      breaker: false,
+    });
+    setModelEditSaving(false);
+  };
+
+  const handleModelSave = async (values: z.infer<typeof modelEditSchema>) => {
+    setModelEditSaving(true);
+    try {
+      if (editingModel) {
+        const updated = await updateModel(editingModel.ID, {
+          name: values.name,
+          remark: values.remark,
+          max_retry: values.max_retry,
+          time_out: values.time_out,
+          strategy: values.strategy,
+          io_log: values.io_log,
+          breaker: values.breaker,
+        });
+
+        setModels((prev) =>
+          prev.map((model) =>
+            model.ID === editingModel.ID
+              ? {
+                ...model,
+                Name: updated.Name,
+                Remark: updated.Remark,
+                MaxRetry: updated.MaxRetry,
+                TimeOut: updated.TimeOut,
+                Strategy: updated.Strategy,
+                IOLog: updated.IOLog,
+                Breaker: updated.Breaker,
+              }
+              : model
+          )
+        );
+        toast.success(`模型: ${updated.Name} 更新成功`);
+      } else {
+        const created = await createModel({
+          name: values.name,
+          remark: values.remark,
+          max_retry: values.max_retry,
+          time_out: values.time_out,
+          strategy: values.strategy,
+          io_log: values.io_log,
+          breaker: values.breaker,
+        });
+
+        setModels((prev) => sortCardModels([...prev, created]));
+        setModelAssociationCountMap((prev) => ({ ...prev, [created.ID]: 0 }));
+        toast.success(`模型: ${created.Name} 创建成功`);
+      }
+      closeModelEditDialog();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(`${editingModel ? "更新" : "创建"}模型失败: ${message}`);
+    } finally {
+      setModelEditSaving(false);
+    }
+  };
+
+  const handleModelSelect = (modelId: number) => {
+    if (modelId === selectedModelId) return;
+    setLoading(true);
+    setSelectedModelId(modelId);
+    setModelProviders([]);
+    setProviderStatus({});
+    setStatusError(null);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("modelId", modelId.toString());
+    setSearchParams(nextParams);
+    form.setValue("model_id", modelId);
+  };
+
+  const handleBackToModelCards = () => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("modelId");
+    setSearchParams(nextParams);
+    setSelectedModelId(null);
+    setModelProviders([]);
+    setProviderStatus({});
+    setStatusError(null);
+    form.setValue("model_id", 0);
   };
 
   // 获取唯一的提供商类型列表
   const providerTypes = Array.from(new Set(providers.map(p => p.Type).filter(Boolean)));
 
-  // 根据选择的提供商类型过滤关联管理，并按权重排序
-  const filteredModelProviders = selectedProviderType && selectedProviderType !== "all"
-    ? modelProviders.filter(association => {
-      const provider = providers.find(p => p.ID === association.ProviderID);
-      return provider?.Type === selectedProviderType;
-    })
-    : modelProviders;
+  // 根据筛选条件过滤关联管理，并按权重排序
+  const filteredModelProviders = modelProviders.filter((association) => {
+    const provider = providers.find((p) => p.ID === association.ProviderID);
+    const matchesType = selectedProviderType === "all" || provider?.Type === selectedProviderType;
+    if (!matchesType) return false;
+    if (!providerSearchTerm) return true;
+
+    const providerName = (provider?.Name ?? "").toLowerCase();
+    const providerModel = (association.ProviderModel ?? "").toLowerCase();
+    const providerType = (provider?.Type ?? "").toLowerCase();
+    const providerId = association.ProviderID.toString();
+    return (
+      providerName.includes(providerSearchTerm) ||
+      providerModel.includes(providerSearchTerm) ||
+      providerType.includes(providerSearchTerm) ||
+      providerId.includes(providerSearchTerm)
+    );
+  });
 
   // 按权重排序
   const sortedModelProviders = [...filteredModelProviders].sort((a, b) => {
@@ -629,94 +688,414 @@ export default function ModelProvidersPage() {
     return weightSortOrder === "asc" ? a.Weight - b.Weight : b.Weight - a.Weight;
   });
 
-  const hasAssociationFilter = selectedProviderType !== "all";
+  const hasAssociationFilter = selectedProviderType !== "all" || providerSearchTerm.length > 0;
+  const getAssociationCountNumberText = (modelId: number) => {
+    const count = modelAssociationCountMap[modelId];
+    if (count === undefined) return modelAssociationCountLoading ? "-" : "--";
+    if (count < 0) return "--";
+    return String(count);
+  };
+
+  const filteredOverviewModels = orderedCardModels.filter((model) => {
+    const matchesSearch = modelSearchTerm.length === 0 || model.Name.toLowerCase().includes(modelSearchTerm.toLowerCase());
+    const matchesStrategy = modelStrategyFilter === "all" || model.Strategy === modelStrategyFilter;
+    const matchesIO =
+      modelIOLogFilter === "all" ||
+      (modelIOLogFilter === "true" && !!model.IOLog) ||
+      (modelIOLogFilter === "false" && !model.IOLog);
+    return matchesSearch && matchesStrategy && matchesIO;
+  });
+
+  const hasModelOverviewFilter =
+    modelSearchTerm.length > 0 || modelStrategyFilter !== "all" || modelIOLogFilter !== "all";
+  const modelPendingDelete = modelDeleteId ? models.find((model) => model.ID === modelDeleteId) : null;
+
+  const handleDeleteModel = async () => {
+    if (!modelDeleteId) return;
+    setModelDeleteLoading(true);
+    try {
+      const targetModel = models.find((model) => model.ID === modelDeleteId);
+      await deleteModel(modelDeleteId);
+      setModels((prev) => prev.filter((model) => model.ID !== modelDeleteId));
+      setModelAssociationCountMap((prev) => {
+        const next = { ...prev };
+        delete next[modelDeleteId];
+        return next;
+      });
+      toast.success(`模型: ${targetModel?.Name ?? modelDeleteId} 删除成功`);
+      setModelDeleteId(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(t('toast.model_save_failed', { message }));
+      console.error(err);
+    } finally {
+      setModelDeleteLoading(false);
+    }
+  };
 
   if (loading && models.length === 0 && providers.length === 0) return <Loading message="加载模型和提供商" />;
 
   return (
     <div className="h-full min-h-0 flex flex-col gap-2 p-1">
       <div className="flex flex-col gap-2 flex-shrink-0">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="text-2xl font-bold tracking-tight">关联管理</h2>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 space-y-1">
+            <h2 className="text-2xl font-bold tracking-tight">{t('title')}</h2>
           </div>
+          {selectedModelId && (
+            <div className="flex items-center gap-2">
+              <Button variant="outline" className="h-8 text-xs" onClick={handleBackToModelCards}>
+                <ArrowLeft className="size-3.5" />
+                {t('actions.back_to_list')}
+              </Button>
+              <Button onClick={() => openCreateDialog()} className="h-8 text-xs">
+                {t('actions.add_association')}
+              </Button>
+            </div>
+          )}
         </div>
-        <div className="flex flex-col gap-2 flex-shrink-0">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
-            <div className="flex flex-col gap-1 text-xs">
-              <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">关联模型</Label>
-              <Select value={selectedModelId?.toString() || ""} onValueChange={handleModelChange}>
-                <SelectTrigger className="h-8 w-full text-xs px-2">
-                  <SelectValue placeholder="选择模型" />
-                </SelectTrigger>
-                <SelectContent>
-                  {models.map((model) => (
-                    <SelectItem key={model.ID} value={model.ID.toString()}>
-                      {model.Name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-1 text-xs">
-              <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">提供商类型</Label>
-              <Select value={selectedProviderType} onValueChange={setSelectedProviderType}>
-                <SelectTrigger className="h-8 w-full text-xs px-2">
-                  <SelectValue placeholder="按类型筛选" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部</SelectItem>
-                  {providerTypes.map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {type}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex items-end col-span-2 sm:col-span-2 lg:col-span-1 gap-2">
-              <div className="flex-1">
-                <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">权重排序</Label>
-                <Select value={weightSortOrder} onValueChange={(value) => setWeightSortOrder(value as "asc" | "desc" | "none")}>
+
+        {!selectedModelId && (
+          <div className="flex flex-col gap-2">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+              <div className="flex flex-col gap-1 text-xs lg:min-w-0 lg:col-span-2">
+                <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.search')}</Label>
+                <div className="relative">
+                  <Search className="size-4 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder={t('filters.search_placeholder')}
+                    value={modelSearchInput}
+                    onChange={(event) => setModelSearchInput(event.target.value)}
+                    className="h-8 pl-8 text-xs"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1 text-xs">
+                <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.strategy')}</Label>
+                <Select
+                  value={modelStrategyFilter}
+                  onValueChange={(value) => setModelStrategyFilter(value as StrategyFilter)}
+                >
                   <SelectTrigger className="h-8 w-full text-xs px-2">
-                    <SelectValue placeholder="选择排序方式" />
+                    <SelectValue placeholder={t('filters.strategy')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">默认顺序</SelectItem>
-                    <SelectItem value="asc">权重升序</SelectItem>
-                    <SelectItem value="desc">权重降序</SelectItem>
+                    <SelectItem value="all">{t('common:status.all')}</SelectItem>
+                    <SelectItem value="lottery">Lottery</SelectItem>
+                    <SelectItem value="rotor">Rotor</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <Button
-                onClick={openCreateDialog}
-                disabled={!selectedModelId}
-                className="h-8 text-xs"
-              >
-                添加关联
-              </Button>
+              <div className="flex flex-col gap-1 text-xs">
+                <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.io_log')}</Label>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={modelIOLogFilter}
+                    onValueChange={(value) => setModelIOLogFilter(value as IOLogFilter)}
+                  >
+                    <SelectTrigger className="h-8 w-full text-xs px-2">
+                      <SelectValue placeholder={t('filters.io_log')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">{t('common:status.all')}</SelectItem>
+                      <SelectItem value="true">{t('filters.io_log_on')}</SelectItem>
+                      <SelectItem value="false">{t('filters.io_log_off')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button onClick={openModelCreateDialog} className="h-8 text-xs shrink-0">
+                    {t('actions.add_model')}
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {selectedModelId && (
+          <div className="flex flex-col gap-2 flex-shrink-0">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+              <div className="flex flex-col gap-1 text-xs">
+                <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.provider_search')}</Label>
+                <div className="relative">
+                  <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder={t('filters.provider_search_placeholder')}
+                    value={providerSearchInput}
+                    onChange={(event) => setProviderSearchInput(event.target.value)}
+                    className="h-8 pl-7 text-xs"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-col gap-1 text-xs">
+                <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.quick_switch')}</Label>
+                <Select value={selectedModelId?.toString() || ""} onValueChange={(value) => handleModelSelect(Number(value))}>
+                  <SelectTrigger className="h-8 w-full text-xs px-2">
+                    <SelectValue placeholder={t('filters.model_placeholder')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {orderedCardModels.map((model) => (
+                      <SelectItem key={model.ID} value={model.ID.toString()}>
+                        {model.Name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1 text-xs">
+                <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.provider_type')}</Label>
+                <Select value={selectedProviderType} onValueChange={setSelectedProviderType}>
+                  <SelectTrigger className="h-8 w-full text-xs px-2">
+                    <SelectValue placeholder={t('filters.provider_type_placeholder')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('common:status.all')}</SelectItem>
+                    {providerTypes.map((type) => (
+                      <SelectItem key={type} value={type}>
+                        {type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex flex-col gap-1 text-xs">
+                <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.weight_sort')}</Label>
+                <Select value={weightSortOrder} onValueChange={(value) => setWeightSortOrder(value as "asc" | "desc" | "none")}>
+                  <SelectTrigger className="h-8 w-full text-xs px-2">
+                    <SelectValue placeholder={t('filters.weight_sort')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">{t('filters.weight_sort_none')}</SelectItem>
+                    <SelectItem value="asc">{t('filters.weight_sort_asc')}</SelectItem>
+                    <SelectItem value="desc">{t('filters.weight_sort_desc')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {statusError && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {statusError}
+      {!selectedModelId && (
+        <div className="flex-1 min-h-0 border rounded-md bg-background shadow-sm">
+          {loading ? (
+            <div className="flex h-full items-center justify-center">
+              <Loading message={t('loading_models')} />
+            </div>
+          ) : filteredOverviewModels.length === 0 ? (
+            <div className="flex h-full items-center justify-center text-muted-foreground">
+              {hasModelOverviewFilter ? t('no_models_filtered') : t('no_models')}
+            </div>
+          ) : (
+            <div className="h-full flex flex-col">
+              <div className="hidden sm:block flex-1 overflow-y-auto">
+                <div className="w-full">
+                  <Table className="min-w-[1100px]">
+                    <TableHeader className="z-10 sticky top-0 bg-secondary/80 text-secondary-foreground">
+                      <TableRow>
+                        <TableHead>{t('model_table.id')}</TableHead>
+                        <TableHead>{t('model_table.name')}</TableHead>
+                        <TableHead>{t('model_table.remark')}</TableHead>
+                        <TableHead className="text-center">{t('model_table.associations')}</TableHead>
+                        <TableHead className="text-center">{t('model_table.max_retry')}</TableHead>
+                        <TableHead className="text-center">{t('model_table.timeout')}</TableHead>
+                        <TableHead className="text-center">{t('model_table.strategy')}</TableHead>
+                        <TableHead className="text-center">{t('model_table.io_log')}</TableHead>
+                        <TableHead className="text-center">{t('model_table.actions')}</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredOverviewModels.map((model) => (
+                        <TableRow
+                          key={model.ID}
+                          draggable={!cardOrderSaving && !hasModelOverviewFilter}
+                          onDragStart={(event) => handleCardDragStart(event, model.ID)}
+                          onDragOver={(event) => handleCardDragOver(event, model.ID)}
+                          onDrop={handleCardDrop}
+                          onDragEnd={handleCardDragEnd}
+                          className={`cursor-pointer transition-colors ${
+                            draggingModelId === model.ID ? "opacity-60 ring-1 ring-primary/60" : ""
+                          } ${
+                            dragOverModelId === model.ID && draggingModelId !== model.ID ? "bg-accent/40" : ""
+                          }`}
+                          onClick={() => {
+                            if (suppressCardClick || cardOrderSaving) return;
+                            handleModelSelect(model.ID);
+                          }}
+                        >
+                          <TableCell className="font-mono text-xs text-muted-foreground">{model.ID}</TableCell>
+                          <TableCell className="font-medium">{model.Name}</TableCell>
+                          <TableCell className="max-w-[240px] truncate text-sm" title={model.Remark || "-"}>
+                            {model.Remark || "-"}
+                          </TableCell>
+                          <TableCell className="text-sm text-center">{getAssociationCountNumberText(model.ID)}</TableCell>
+                          <TableCell className="text-center">{model.MaxRetry}</TableCell>
+                          <TableCell className="text-center">{model.TimeOut}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground text-center">{renderStrategy(model.Strategy)}</TableCell>
+                          <TableCell className="text-center">
+                            <span className={model.IOLog ? "text-green-500" : "text-red-500"}>
+                              {model.IOLog ? "✓" : "✗"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex gap-2 justify-center">
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openModelEditDialog(model);
+                                }}
+                                title={t('model_form.edit_title')}
+                                aria-label={t('model_form.edit_title')}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openCreateDialog(model.ID);
+                                }}
+                                title={t('actions.add_association')}
+                                aria-label={t('actions.add_association')}
+                              >
+                                <Link className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleModelSelect(model.ID);
+                                }}
+                                title={t('common:actions.search')}
+                                aria-label={t('common:actions.search')}
+                              >
+                                <ListCollapse className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setModelDeleteId(model.ID);
+                                }}
+                                aria-label="删除模型"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+              <div className="sm:hidden flex-1 min-h-0 overflow-y-auto px-2 py-3 divide-y divide-border">
+                {filteredOverviewModels.map((model) => (
+                  <div
+                    key={model.ID}
+                    draggable={!cardOrderSaving && !hasModelOverviewFilter}
+                    onDragStart={(event) => handleCardDragStart(event, model.ID)}
+                    onDragOver={(event) => handleCardDragOver(event, model.ID)}
+                    onDrop={handleCardDrop}
+                    onDragEnd={handleCardDragEnd}
+                    className={`py-3 space-y-3 transition-colors ${
+                      draggingModelId === model.ID ? "opacity-60" : ""
+                    } ${
+                      dragOverModelId === model.ID && draggingModelId !== model.ID ? "bg-accent/20 rounded-md" : ""
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="font-semibold text-sm truncate">{model.Name}</h3>
+                        <p className="text-[11px] text-muted-foreground">{t('model_table.model_id', { id: model.ID })}</p>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => openModelEditDialog(model)}
+                          title={t('model_form.edit_title')}
+                          aria-label={t('model_form.edit_title')}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => openCreateDialog(model.ID)}
+                          title={t('actions.add_association')}
+                          aria-label={t('actions.add_association')}
+                        >
+                          <Link className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => handleModelSelect(model.ID)}
+                          title={t('common:actions.search')}
+                          aria-label={t('common:actions.search')}
+                        >
+                          <ListCollapse className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => setModelDeleteId(model.ID)}
+                          aria-label="删除模型"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="text-xs space-y-1">
+                      <p className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('mobile.remark')}</p>
+                      <p className="break-words">{model.Remark || "-"}</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <MobileInfoItem label={t('mobile.max_retry')} value={model.MaxRetry} />
+                      <MobileInfoItem label={t('mobile.timeout')} value={t('mobile.timeout_unit', { value: model.TimeOut })} />
+                      <MobileInfoItem label={t('mobile.strategy')} value={renderStrategy(model.Strategy)} />
+                      <MobileInfoItem label={t('mobile.associations')} value={getAssociationCountNumberText(model.ID)} />
+                      <MobileInfoItem
+                        label={t('mobile.io_log')}
+                        value={<span className={model.IOLog ? "text-green-500" : "text-red-500"}>{model.IOLog ? "✓" : "✗"}</span>}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
-      <div className="flex-1 min-h-0 border rounded-md bg-background shadow-sm">
+
+      {selectedModelId && (
+        <>
+          {statusError && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {statusError}
+            </div>
+          )}
+          <div className="flex-1 min-h-0 border rounded-md bg-background shadow-sm">
         {loading ? (
           <div className="flex h-full items-center justify-center">
-            <Loading message="加载关联数据" />
-          </div>
-        ) : !selectedModelId ? (
-          <div className="flex h-full items-center justify-center text-muted-foreground">
-            请选择一个模型来查看其提供商关联
+            <Loading message={t('loading_associations')} />
           </div>
         ) : sortedModelProviders.length === 0 ? (
           <div className="flex h-full items-center justify-center text-muted-foreground text-sm text-center px-6">
-            {hasAssociationFilter ? '当前类型暂无关联' : '该模型还没有关联的提供商'}
+            {hasAssociationFilter ? t('no_associations_filtered') : t('no_associations')}
           </div>
         ) : (
           <div className="h-full flex flex-col">
@@ -725,31 +1104,31 @@ export default function ModelProvidersPage() {
                 <Table className="min-w-[1200px]">
                   <TableHeader className="z-10 sticky top-0 bg-secondary/80 text-secondary-foreground">
                     <TableRow>
-                      <TableHead>ID</TableHead>
-                      <TableHead>提供商模型</TableHead>
-                      <TableHead>类型</TableHead>
-                      <TableHead>提供商</TableHead>
-                      <TableHead>工具调用</TableHead>
-                      <TableHead>结构化输出</TableHead>
-                      <TableHead>视觉</TableHead>
-                      <TableHead>请求头透传</TableHead>
-                      <TableHead>权重</TableHead>
-                      <TableHead>启用</TableHead>
+                      <TableHead>{t('association_table.id')}</TableHead>
+                      <TableHead>{t('association_table.provider_model')}</TableHead>
+                      <TableHead>{t('association_table.type')}</TableHead>
+                      <TableHead>{t('association_table.provider')}</TableHead>
+                      <TableHead>{t('association_table.tool_call')}</TableHead>
+                      <TableHead>{t('association_table.structured_output')}</TableHead>
+                      <TableHead>{t('association_table.vision')}</TableHead>
+                      <TableHead>{t('association_table.with_header')}</TableHead>
+                      <TableHead>{t('association_table.weight')}</TableHead>
+                      <TableHead>{t('association_table.enabled')}</TableHead>
                       <TableHead>
-                        <div className="flex items-center gap-1">状态
+                        <div className="flex items-center gap-1">{t('association_table.status')}
                           <Button
                             onClick={() => loadProviderStatus(modelProviders, selectedModelId)}
                             variant="ghost"
                             size="icon"
-                            aria-label="刷新状态"
-                            title="刷新状态"
+                            aria-label={t('actions.refresh_status')}
+                            title={t('actions.refresh_status')}
                             className="rounded-full"
                           >
                             <RefreshCw className="size-4" />
                           </Button>
                         </div>
                       </TableHead>
-                      <TableHead>操作</TableHead>
+                      <TableHead>{t('association_table.actions')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -763,8 +1142,8 @@ export default function ModelProvidersPage() {
                           <TableCell className="max-w-[200px] truncate" title={association.ProviderModel}>
                             {association.ProviderModel}
                           </TableCell>
-                          <TableCell>{provider?.Type ?? '未知'}</TableCell>
-                          <TableCell>{provider?.Name ?? '未知'}</TableCell>
+                          <TableCell>{provider?.Type ?? t('common:unknown')}</TableCell>
+                          <TableCell>{provider?.Name ?? t('common:unknown')}</TableCell>
                           <TableCell>
                             <span className={association.ToolCall ? "text-green-600" : "text-red-600"}>
                               {association.ToolCall ? '✓' : '✗'}
@@ -795,7 +1174,7 @@ export default function ModelProvidersPage() {
                                 aria-label="切换启用状态"
                               />
                               <span className="text-xs text-muted-foreground">
-                                {isAssociationEnabled ? '已启用' : '已停用'}
+                                {isAssociationEnabled ? t('association_table.active') : t('association_table.inactive')}
                               </span>
                             </div>
                           </TableCell>
@@ -808,12 +1187,12 @@ export default function ModelProvidersPage() {
                                       <div
                                         key={index}
                                         className={`w-1 h-6 ${isSuccess ? 'bg-green-500' : 'bg-red-500'}`}
-                                        title={isSuccess ? '成功' : '失败'}
+                                        title={isSuccess ? t('association_table.success') : t('association_table.failed')}
                                       />
                                     ))}
                                   </div>
                                 ) : (
-                                  <div className="text-xs text-gray-400">无数据</div>
+                                  <div className="text-xs text-gray-400">{t('association_table.no_data')}</div>
                                 )
                               ) : (
                                 <Spinner />
@@ -825,7 +1204,7 @@ export default function ModelProvidersPage() {
                               <Button variant="outline" size="icon" onClick={() => openEditDialog(association)}>
                                 <Pencil className="h-4 w-4" />
                               </Button>
-                              <Button variant="outline" size="icon" onClick={() => handleTest(association.ID)}>
+                              <Button variant="outline" size="icon" onClick={() => openTestDialog(association.ID)}>
                                 <Zap className="h-4 w-4" />
                               </Button>
                               <AlertDialog open={deleteId === association.ID} onOpenChange={(open) => !open && setDeleteId(null)}>
@@ -865,39 +1244,39 @@ export default function ModelProvidersPage() {
                   <div key={association.ID} className="py-3 space-y-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 flex-1">
-                        <h3 className="font-semibold text-sm truncate">{provider?.Name ?? '未知提供商'}</h3>
-                        <p className="text-[11px] text-muted-foreground">提供商模型: {association.ProviderModel}</p>
+                        <h3 className="font-semibold text-sm truncate">{provider?.Name ?? t('association_table.unknown_provider')}</h3>
+                        <p className="text-[11px] text-muted-foreground">{t('association_table.mobile.provider_type')}: {association.ProviderModel}</p>
                       </div>
                       <span
                         className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${isAssociationEnabled ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}
                       >
-                        {isAssociationEnabled ? '已启用' : '已停用'}
+                        {isAssociationEnabled ? t('association_table.active') : t('association_table.inactive')}
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-xs">
-                      <MobileInfoItem label="提供商类型" value={provider?.Type ?? '未知'} />
-                      <MobileInfoItem label="提供商 ID" value={<span className="font-mono text-xs">{provider?.ID ?? '-'}</span>} />
-                      <MobileInfoItem label="权重" value={association.Weight} />
+                      <MobileInfoItem label={t('association_table.mobile.provider_type')} value={provider?.Type ?? t('common:unknown')} />
+                      <MobileInfoItem label={t('association_table.mobile.provider_id')} value={<span className="font-mono text-xs">{provider?.ID ?? '-'}</span>} />
+                      <MobileInfoItem label={t('association_table.mobile.weight')} value={association.Weight} />
                       <MobileInfoItem
-                        label="请求头透传"
+                        label={t('association_table.mobile.with_header')}
                         value={<span className={association.WithHeader ? "text-green-600" : "text-red-600"}>{association.WithHeader ? '✓' : '✗'}</span>}
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <MobileInfoItem
-                        label="工具调用"
+                        label={t('association_table.mobile.tool_call')}
                         value={<span className={association.ToolCall ? "text-green-600" : "text-red-600"}>{association.ToolCall ? '✓' : '✗'}</span>}
                       />
                       <MobileInfoItem
-                        label="结构化输出"
+                        label={t('association_table.mobile.structured_output')}
                         value={<span className={association.StructuredOutput ? "text-green-600" : "text-red-600"}>{association.StructuredOutput ? '✓' : '✗'}</span>}
                       />
                       <MobileInfoItem
-                        label="视觉能力"
+                        label={t('association_table.mobile.vision')}
                         value={<span className={association.Image ? "text-green-600" : "text-red-600"}>{association.Image ? '✓' : '✗'}</span>}
                       />
                       <MobileInfoItem
-                        label="最近状态"
+                        label={t('association_table.mobile.recent_status')}
                         value={
                           <div className="flex items-center gap-1">
                             {statusBars ? (
@@ -909,7 +1288,7 @@ export default function ModelProvidersPage() {
                                   />
                                 ))
                               ) : (
-                                <span className="text-muted-foreground text-[11px]">无数据</span>
+                                <span className="text-muted-foreground text-[11px]">{t('association_table.no_data')}</span>
                               )
                             ) : (
                               <Spinner />
@@ -919,9 +1298,9 @@ export default function ModelProvidersPage() {
                       />
                     </div>
                     <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
-                      <p className="text-xs text-muted-foreground">启用状态</p>
+                      <p className="text-xs text-muted-foreground">{t('association_table.mobile.enable_status')}</p>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{isAssociationEnabled ? "启用" : "停用"}</span>
+                        <span className="text-sm font-medium">{isAssociationEnabled ? t('association_table.active') : t('association_table.inactive')}</span>
                         <Switch
                           checked={isAssociationEnabled}
                           disabled={!!statusUpdating[association.ID]}
@@ -943,7 +1322,7 @@ export default function ModelProvidersPage() {
                         variant="outline"
                         size="icon"
                         className="h-7 w-7"
-                        onClick={() => handleTest(association.ID)}
+                        onClick={() => openTestDialog(association.ID)}
                       >
                         <Zap className="h-3.5 w-3.5" />
                       </Button>
@@ -977,298 +1356,94 @@ export default function ModelProvidersPage() {
           </div>
         )}
       </div>
+        </>
+      )}
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85vh] flex flex-col">
+      <AlertDialog open={modelDeleteId !== null} onOpenChange={(open) => !open && setModelDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('delete_model_dialog.title')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('delete_model_dialog.description', { name: modelPendingDelete ? `「${modelPendingDelete.Name}」` : '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={modelDeleteLoading}>{t('common:actions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteModel} disabled={modelDeleteLoading}>
+              {modelDeleteLoading ? t('common:actions.deleting') : t('common:actions.confirm_delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog open={modelEditOpen} onOpenChange={(open) => (open ? setModelEditOpen(true) : closeModelEditDialog())}>
+        <DialogContent>
           <DialogHeader>
-            <DialogTitle>
-              {editingAssociation ? "编辑关联" : "添加关联"}
-            </DialogTitle>
+            <DialogTitle>{editingModel ? t('model_form.edit_title') : t('model_form.add_title')}</DialogTitle>
+            <DialogDescription>
+              {editingModel ? t('model_form.edit_desc') : t('model_form.add_desc')}
+            </DialogDescription>
           </DialogHeader>
+          <Form {...modelEditForm}>
+            <form onSubmit={modelEditForm.handleSubmit(handleModelSave)} className="space-y-4">
+              <FormField
+                control={modelEditForm.control}
+                name="name"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('model_form.name')}</FormLabel>
+                    <FormControl>
+                      <Input {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(editingAssociation ? handleUpdate : handleCreate)} className="flex flex-col gap-4 flex-1 min-h-0">
-              <div className="space-y-4 overflow-y-auto pr-1 sm:pr-2 max-h-[60vh] flex-1 min-h-0">
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField
-                    control={form.control}
-                    name="model_id"
-                    render={({ field }) => (
-                      <FormItem className="min-w-0">
-                        <FormLabel>模型</FormLabel>
-                        <Select
-                          value={field.value.toString()}
-                          onValueChange={(value) => field.onChange(parseInt(value))}
-                          disabled={!!editingAssociation}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="form-select w-full">
-                              <SelectValue placeholder="选择模型" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {models.map((model) => (
-                              <SelectItem key={model.ID} value={model.ID.toString()}>
-                                {model.Name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+              <FormField
+                control={modelEditForm.control}
+                name="remark"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('model_form.remark')}</FormLabel>
+                    <FormControl>
+                      <Textarea {...field} rows={3} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-                  <FormField
-                    control={form.control}
-                    name="provider_id"
-                    render={({ field }) => (
-                      <FormItem className="min-w-0">
-                        <FormLabel>提供商</FormLabel>
-                        <Select
-                          value={field.value ? field.value.toString() : ""}
-                          onValueChange={(value) => {
-                            const parsed = parseInt(value);
-                            field.onChange(parsed);
-                            form.setValue("provider_name", "");
-                          }}
-                        >
-                          <FormControl>
-                            <SelectTrigger className="form-select w-full">
-                              <SelectValue placeholder="选择提供商" />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            {providers.map((provider) => (
-                              <SelectItem key={provider.ID} value={provider.ID.toString()}>
-                                {provider.Name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
-
+              <div className="grid grid-cols-2 gap-4">
                 <FormField
-                  control={form.control}
-                  name="provider_name"
+                  control={modelEditForm.control}
+                  name="max_retry"
                   render={({ field }) => (
-                    <FormItem className="space-y-2">
-                      <FormLabel>提供商模型</FormLabel>
+                    <FormItem>
+                      <FormLabel>{t('model_form.max_retry')}</FormLabel>
                       <FormControl>
-                        <div className="relative">
-                          <Input
-                            {...field}
-                            placeholder="输入或选择提供商模型"
-                            onFocus={() => setShowProviderModels(true)}
-                            onBlur={() => setTimeout(() => setShowProviderModels(false), 100)}
-                            onChange={(e) => {
-                              field.onChange(e.target.value);
-                              setShowProviderModels(true);
-                            }}
-                          />
-                          {showProviderModels && (providerModelsMap[selectedProviderId] || []).length > 0 && (
-                            <div className="absolute z-10 mt-1 w-full rounded-md border bg-popover text-popover-foreground shadow-sm max-h-52 overflow-y-auto">
-                              {sortProviderModels(selectedProviderId, field.value || "").map((model) => (
-                                <button
-                                  key={model.id}
-                                  type="button"
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-accent hover:text-accent-foreground"
-                                  onMouseDown={(e) => {
-                                    e.preventDefault();
-                                    field.onChange(model.id);
-                                    setShowProviderModels(false);
-                                  }}
-                                >
-                                  {model.id}
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
+                        <Input
+                          type="number"
+                          {...field}
+                          onChange={(e) => field.onChange(+e.target.value)}
+                        />
                       </FormControl>
-                      {selectedProviderId ? (
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <p>可直接输入，或在下拉列表中选择</p>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => loadProviderModels(selectedProviderId, true)}
-                            disabled={!!providerModelsLoading[selectedProviderId]}
-                          >
-                            {providerModelsLoading[selectedProviderId] ? (
-                              <Spinner className="size-4" />
-                            ) : (
-                              <RefreshCw className="size-4" />
-                            )}
-                          </Button>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">请选择提供商以加载模型列表</p>
-                      )}
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                <FormLabel>模型能力</FormLabel>
-                <FormField
-                  control={form.control}
-                  name="tool_call"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                      <FormControl>
-                        <Checkbox
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                      <div className="space-y-1 leading-none">
-                        <FormLabel>
-                          工具调用
-                        </FormLabel>
-                      </div>
-                    </FormItem>
-                  )}
-                />
 
                 <FormField
-                  control={form.control}
-                  name="structured_output"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                      <FormControl>
-                        <Checkbox
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                      <div className="space-y-1 leading-none">
-                        <FormLabel>
-                          结构化输出
-                        </FormLabel>
-                      </div>
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="image"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                      <FormControl>
-                        <Checkbox
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                      <div className="space-y-1 leading-none">
-                        <FormLabel>
-                          视觉
-                        </FormLabel>
-                      </div>
-                    </FormItem>
-                  )}
-                />
-                <FormLabel>参数配置</FormLabel>
-                <FormField
-                  control={form.control}
-                  name="with_header"
-                  render={({ field }) => (
-                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                      <FormControl>
-                        <Checkbox
-                          checked={field.value}
-                          onCheckedChange={field.onChange}
-                        />
-                      </FormControl>
-                      <div className="space-y-1 leading-none">
-                        <FormLabel>
-                          请求头透传
-                        </FormLabel>
-                      </div>
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="customer_headers"
-                  render={({ field }) => {
-                    const headerValues = field.value ?? [];
-                    return (
-                      <FormItem>
-                        <div className="flex items-center justify-between">
-                          <FormLabel>自定义请求头</FormLabel>
-                          <Button type="button" variant="outline" size="sm" onClick={() => appendHeader({ key: "", value: "" })}>
-                            添加
-                          </Button>
-                        </div>
-                        <div className="space-y-2">
-                          {headerFields.map((header, index) => {
-                            const errorMsg = form.formState.errors.customer_headers?.[index]?.key?.message;
-                            return (
-                              <div key={header.id} className="space-y-1">
-                                <div className="flex gap-2 items-center">
-                                  <div className="flex-1">
-                                    <Input
-                                      placeholder="Header Key"
-                                      value={headerValues[index]?.key ?? ""}
-                                      onChange={(e) => {
-                                        const next = [...headerValues];
-                                        next[index] = { ...next[index], key: e.target.value };
-                                        field.onChange(next);
-                                      }}
-                                    />
-                                  </div>
-                                  <div className="flex-1">
-                                    <Input
-                                      placeholder="Header Value"
-                                      value={headerValues[index]?.value ?? ""}
-                                      onChange={(e) => {
-                                        const next = [...headerValues];
-                                        next[index] = { ...next[index], value: e.target.value };
-                                        field.onChange(next);
-                                      }}
-                                    />
-                                  </div>
-                                  <Button type="button" size="sm" variant="destructive" onClick={() => removeHeader(index)}>
-                                    删除
-                                  </Button>
-                                </div>
-                                {errorMsg && (
-                                  <p className="text-sm text-red-500">
-                                    {errorMsg}
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })}
-                          <p className="text-sm text-muted-foreground">
-                            {"优先级: 提供商配置 > 自定义请求头 > 透传请求头"}
-                          </p>
-                        </div>
-                      </FormItem>
-                    );
-                  }}
-                />
-
-                <FormField
-                  control={form.control}
-                  name="weight"
+                  control={modelEditForm.control}
+                  name="time_out"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>权重 (必须大于0)</FormLabel>
+                      <FormLabel>{t('model_form.timeout')}</FormLabel>
                       <FormControl>
                         <Input
-                          {...field}
                           type="number"
-                          min="1"
-                          onChange={(e) => field.onChange(parseInt(e.target.value) || 0)}
+                          {...field}
+                          onChange={(e) => field.onChange(+e.target.value)}
                         />
                       </FormControl>
                       <FormMessage />
@@ -1277,12 +1452,90 @@ export default function ModelProvidersPage() {
                 />
               </div>
 
+              <FormField
+                control={modelEditForm.control}
+                name="io_log"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">{t('model_form.io_log')}</FormLabel>
+                    </div>
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={modelEditForm.control}
+                name="breaker"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">{t('model_form.breaker')}</FormLabel>
+                    </div>
+                    <FormControl>
+                      <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={modelEditForm.control}
+                name="strategy"
+                render={({ field }) => (
+                  <FormItem className="rounded-lg border p-4 space-y-3">
+                    <div className="flex flex-col gap-1">
+                      <FormLabel className="text-base">{t('model_form.strategy')}</FormLabel>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {[
+                        {
+                          value: "lottery",
+                          title: t('model_form.strategy_lottery_title'),
+                          desc: t('model_form.strategy_lottery_desc'),
+                        },
+                        {
+                          value: "rotor",
+                          title: t('model_form.strategy_rotor_title'),
+                          desc: t('model_form.strategy_rotor_desc'),
+                        },
+                      ].map((option) => (
+                        <label
+                          key={option.value}
+                          className="flex cursor-pointer items-start gap-3 rounded-md border p-3 hover:bg-accent"
+                        >
+                          <FormControl>
+                            <Checkbox
+                              checked={field.value === option.value}
+                              onCheckedChange={(checked) => {
+                                if (checked) field.onChange(option.value);
+                              }}
+                            />
+                          </FormControl>
+                          <div className="space-y-1">
+                            <p className="font-medium leading-none">{option.title}</p>
+                            <p className="text-[13px] text-muted-foreground">{option.desc}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                  取消
+                <Button type="button" variant="outline" onClick={closeModelEditDialog} disabled={modelEditSaving}>
+                  {t('model_form.cancel')}
                 </Button>
-                <Button type="submit">
-                  {editingAssociation ? "更新" : "创建"}
+                <Button type="submit" disabled={modelEditSaving}>
+                  {modelEditSaving ? t('model_form.saving') : editingModel ? t('common:actions.update') : t('common:actions.create')}
                 </Button>
               </DialogFooter>
             </form>
@@ -1290,92 +1543,37 @@ export default function ModelProvidersPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Test Dialog */}
-      <Dialog open={testDialogOpen} onOpenChange={setTestDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>模型测试</DialogTitle>
-            <DialogDescription>
-              选择要执行的测试类型
-            </DialogDescription>
-          </DialogHeader>
+      <ModelProviderFormDialog
+        open={open}
+        onOpenChange={setOpen}
+        form={form}
+        onSubmit={submit}
+        editingAssociation={editingAssociation}
+        models={models}
+        providers={providers}
+        headerFields={headerFields}
+        appendHeader={appendHeader}
+        removeHeader={removeHeader}
+        showProviderModels={showProviderModels}
+        setShowProviderModels={setShowProviderModels}
+        selectedProviderId={selectedProviderId}
+        providerModelsMap={providerModelsMap}
+        providerModelsLoading={providerModelsLoading}
+        sortProviderModels={sortProviderModels}
+        loadProviderModels={loadProviderModels}
+      />
 
-          <RadioGroup value={testType} onValueChange={(value: string) => setTestType(value as "connectivity" | "react")} className="space-y-4">
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="connectivity" id="connectivity" />
-              <Label htmlFor="connectivity">连通性测试</Label>
-            </div>
-            <p className="text-sm text-gray-500 ml-6">测试模型提供商的基本连通性</p>
-
-            <div className="flex items-center space-x-2">
-              <RadioGroupItem value="react" id="react" />
-              <Label htmlFor="react">React Agent 能力测试</Label>
-            </div>
-            <p className="text-sm text-gray-500 ml-6">测试模型的工具调用和反应能力</p>
-          </RadioGroup>
-
-          {testType === "connectivity" && (
-            <div className="mt-4">
-              {selectedTestId && testResults[selectedTestId]?.loading ? (
-                <div className="flex items-center justify-center py-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                  <span className="ml-2">测试中...</span>
-                </div>
-              ) : selectedTestId && testResults[selectedTestId] ? (
-                <div className={`p-4 rounded-md ${testResults[selectedTestId].result?.error ? "bg-red-100 text-red-800" : "bg-green-100 text-green-800"}`}>
-                  <p>{testResults[selectedTestId].result?.error ? testResults[selectedTestId].result?.error : "测试成功"}</p>
-                  {testResults[selectedTestId].result?.message && (
-                    <p className="mt-2">{testResults[selectedTestId].result.message}</p>
-                  )}
-                </div>
-              ) : (
-                <p className="text-gray-500">点击"执行测试"开始测试</p>
-              )}
-            </div>
-          )}
-
-          {testType === "react" && (
-            <div className="mt-4 max-h-96 min-w-0">
-              {reactTestResult.loading ? (
-                <div className="flex items-center justify-center py-4">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                  <span className="ml-2">测试中...</span>
-                </div>
-              ) : (
-                <>
-                  {reactTestResult.error ? (
-                    <div className="p-4 rounded-md bg-red-100 text-red-800">
-                      <p>测试失败: {reactTestResult.error}</p>
-                    </div>
-                  ) : reactTestResult.success !== null ? (
-                    <div className={`p-4 rounded-md ${reactTestResult.success ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
-                      <p>{reactTestResult.success ? "测试成功！" : "测试失败"}</p>
-                    </div>
-                  ) : null}
-
-
-                </>
-              )}
-
-              {reactTestResult.messages && <Textarea name="logs" className="mt-4 max-h-50 resize-none whitespace-pre overflow-x-auto" readOnly value={reactTestResult.messages}>
-              </Textarea>}
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={dialogClose}>
-              关闭
-            </Button>
-            <Button onClick={executeTest} disabled={testType === "connectivity" ?
-              (selectedTestId ? testResults[selectedTestId]?.loading : false) :
-              reactTestResult.loading}>
-              {testType === "connectivity" ?
-                (selectedTestId && testResults[selectedTestId]?.loading ? "测试中..." : "执行测试") :
-                (reactTestResult.loading ? "测试中..." : "执行测试")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ModelProviderTestDialog
+        open={testDialogOpen}
+        onOpenChange={setTestDialogOpen}
+        onClose={closeTestDialog}
+        testType={testType}
+        setTestType={setTestType}
+        selectedTestId={selectedTestId}
+        testResults={testResults}
+        reactTestResult={reactTestResult}
+        executeTest={executeTest}
+      />
     </div>
   );
 }

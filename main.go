@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -15,7 +14,7 @@ import (
 	"github.com/atopos31/llmio/handler"
 	"github.com/atopos31/llmio/middleware"
 	"github.com/atopos31/llmio/models"
-	"github.com/gin-contrib/cors"
+	"github.com/atopos31/llmio/pkg/env"
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	_ "golang.org/x/crypto/x509roots/fallback"
@@ -29,15 +28,14 @@ func init() {
 
 func main() {
 	router := gin.Default()
-
+	// gzip压缩
 	router.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPaths([]string{"/openai", "/anthropic", "/gemini", "/v1"})))
-	// 跨域配置
-	config := cors.DefaultConfig()
-	config.AllowAllOrigins = true
-	config.AllowHeaders = append(config.AllowHeaders, "Authorization")
-	router.Use(cors.New(config))
+	// 跨域
+	router.Use(middleware.Cors())
+	// webui
+	setwebui(router)
 
-	token := os.Getenv("TOKEN")
+	token := env.GetWithDefault("TOKEN", "")
 
 	authOpenAI := middleware.AuthOpenAI(token)
 	authAnthropic := middleware.AuthAnthropic(token)
@@ -107,6 +105,7 @@ func main() {
 		api.GET("/models", handler.GetModels)
 		api.GET("/models/select", handler.GetModelList)
 		api.POST("/models", handler.CreateModel)
+		api.PATCH("/models/order", handler.UpdateModelOrder)
 		api.PUT("/models/:id", handler.UpdateModel)
 		api.DELETE("/models/:id", handler.DeleteModel)
 
@@ -142,16 +141,11 @@ func main() {
 		api.GET("/test/react/:id", handler.TestReactHandler)
 		api.GET("/test/count_tokens", handler.TestCountTokens)
 	}
-	setwebui(router)
 
-	port := os.Getenv("LLMIO_SERVER_PORT")
-	if port == "" {
-		port = consts.DefaultPort
-	}
-	router.Run(":" + port)
+	router.Run(":" + env.GetWithDefault("LLMIO_SERVER_PORT", consts.DefaultPort))
 }
 
-//go:embed webui/dist
+//go:embed all:webui/dist
 var distFiles embed.FS
 
 //go:embed webui/dist/index.html

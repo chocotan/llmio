@@ -46,7 +46,7 @@ const (
 				]
 			}
 		]
-  	}`
+	  	}`
 
 	testAnthropic = `{
     	"model": "claude-sonnet-4-5",
@@ -64,7 +64,7 @@ const (
 				]
       		}
     	]
- 	}`
+  	}`
 
 	testGemini = `{
 		"contents": [
@@ -97,14 +97,12 @@ func ProviderTestHandler(c *gin.Context) {
 		return
 	}
 
-	// Create the provider instance
-	providerInstance, err := providers.New(chatModel.Type, chatModel.Config)
+	providerInstance, err := providers.New(chatModel.Type, chatModel.Config, chatModel.Proxy)
 	if err != nil {
 		common.BadRequest(c, "Failed to create provider: "+err.Error())
 		return
 	}
 
-	// Get proxy-aware client for this specific provider
 	client := providers.GetClientWithProxy(time.Second*time.Duration(30), providerInstance.GetProxy())
 	var testBody []byte
 	switch chatModel.Type {
@@ -297,18 +295,17 @@ type ChatModel struct {
 	Type            string            `json:"type"`
 	Model           string            `json:"model"`
 	Config          string            `json:"config"`
+	Proxy           string            `json:"proxy,omitempty"`
 	WithHeader      *bool             `json:"with_header,omitempty"`
 	CustomerHeaders map[string]string `json:"customer_headers,omitempty"`
 }
 
 func FindChatModel(ctx context.Context, id string) (*ChatModel, error) {
-	// Get ModelWithProvider by ID
 	modelWithProvider, err := gorm.G[models.ModelWithProvider](models.DB).Where("id = ?", id).First(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	// Get the Provider
 	provider, err := gorm.G[models.Provider](models.DB).Where("id = ?", modelWithProvider.ProviderID).First(ctx)
 	if err != nil {
 		return nil, err
@@ -319,6 +316,7 @@ func FindChatModel(ctx context.Context, id string) (*ChatModel, error) {
 		Type:            provider.Type,
 		Model:           modelWithProvider.ProviderModel,
 		Config:          provider.Config,
+		Proxy:           provider.Proxy,
 		WithHeader:      modelWithProvider.WithHeader,
 		CustomerHeaders: modelWithProvider.CustomerHeaders,
 	}, nil

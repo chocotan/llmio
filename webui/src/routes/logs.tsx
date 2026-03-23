@@ -1,5 +1,6 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input";
 import Loading from "@/components/loading";
 import { getLogs, getProviders, getModelOptions, getAuthKeysList, type ChatLog, type Provider, type Model, type AuthKeyItem, getProviderTemplates, cleanLogs } from "@/lib/api";
-import { ChevronLeft, ChevronRight, RefreshCw, Trash2, Eye, MessageSquare } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, Trash2, Eye, MessageSquare, Search } from "lucide-react";
 
 // 格式化时间显示
 const formatTime = (nanoseconds: number): string => {
@@ -53,8 +54,41 @@ const DetailCard = ({ label, value, mono = false }: DetailCardProps) => (
 const formatDurationValue = (value?: number) => (typeof value === "number" ? formatTime(value) : "-");
 const formatTokenValue = (value?: number) => (typeof value === "number" ? value.toLocaleString() : "-");
 const formatTpsValue = (value?: number) => (typeof value === "number" ? value.toFixed(2) : "-");
+const getStatusTextClass = (status: string) => {
+  switch (status) {
+    case "success":
+      return "text-green-500";
+    case "running":
+      return "text-amber-500";
+    default:
+      return "text-red-500";
+  }
+};
+
+const getStatusPillClass = (status: string) => {
+  switch (status) {
+    case "success":
+      return "bg-green-100 text-green-700";
+    case "running":
+      return "bg-amber-100 text-amber-700";
+    default:
+      return "bg-red-100 text-red-700";
+  }
+};
+
+const getStatusDetailClass = (status: string) => {
+  switch (status) {
+    case "success":
+      return "text-green-600";
+    case "running":
+      return "text-amber-600";
+    default:
+      return "text-red-600";
+  }
+};
 
 export default function LogsPage() {
+  const { t } = useTranslation(['logs', 'common']);
   const [logs, setLogs] = useState<ChatLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
@@ -70,6 +104,7 @@ export default function LogsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [styleFilter, setStyleFilter] = useState<string>("all");
   const [authKeyFilter, setAuthKeyFilter] = useState<string>("all");
+  const [traceIdFilter, setTraceIdFilter] = useState<string>("");
   const [availableStyles, setAvailableStyles] = useState<string[]>([]);
   const navigate = useNavigate();
   // 详情弹窗
@@ -116,7 +151,8 @@ export default function LogsPage() {
         name: modelFilter === "all" ? undefined : modelFilter,
         status: statusFilter === "all" ? undefined : statusFilter,
         style: styleFilter === "all" ? undefined : styleFilter,
-        authKeyId: authKeyFilter === "all" ? undefined : authKeyFilter
+        authKeyId: authKeyFilter === "all" ? undefined : authKeyFilter,
+        traceId: traceIdFilter.trim() || undefined,
       });
       setLogs(result.data);
       setTotal(result.total);
@@ -132,13 +168,13 @@ export default function LogsPage() {
     fetchModels();
     fetchAuthKeys();
     fetchLogs();
-  }, [page, pageSize, providerNameFilter, modelFilter, statusFilter, styleFilter, authKeyFilter]);
+  }, [page, pageSize, providerNameFilter, modelFilter, statusFilter, styleFilter, authKeyFilter, traceIdFilter]);
   const handleFilterChange = () => {
     setPage(1);
   };
   useEffect(() => {
     handleFilterChange();
-  }, [providerNameFilter, modelFilter, statusFilter, styleFilter, authKeyFilter]);
+  }, [providerNameFilter, modelFilter, statusFilter, styleFilter, authKeyFilter, traceIdFilter]);
   const handlePageChange = (newPage: number) => {
     if (newPage >= 1 && newPage <= pages) setPage(newPage);
   };
@@ -161,11 +197,11 @@ export default function LogsPage() {
     setCleanLoading(true);
     try {
       const result = await cleanLogs({ type: cleanType, value });
-      toast.success(`已清理 ${result.deleted_count} 条日志`);
+      toast.success(t('clean.success', { count: result.deleted_count }));
       fetchLogs();
     } catch (error) {
       console.error("Error cleaning logs:", error);
-      toast.error('清理失败');
+      toast.error(t('clean.failed'));
     } finally {
       setCleanLoading(false);
       setIsCleanDialogOpen(false);
@@ -185,9 +221,21 @@ export default function LogsPage() {
     <div className="h-full min-h-0 flex flex-col gap-2 p-1">
       {/* 顶部标题和刷新 */}
       <div className="flex flex-col gap-2 flex-shrink-0">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <h2 className="text-2xl font-bold tracking-tight">请求日志</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <h2 className="text-2xl font-bold tracking-tight shrink-0">{t('title')}</h2>
+            <div className="relative">
+              <Search className="size-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder={t('trace_id_placeholder')}
+                value={traceIdFilter}
+                onChange={(e) => {
+                  setTraceIdFilter(e.target.value);
+                  setPage(1);
+                }}
+                className="h-8 text-xs w-44 lg:w-64 pl-7"
+              />
+            </div>
           </div>
           <div className="flex gap-2">
             <Button
@@ -195,8 +243,8 @@ export default function LogsPage() {
               variant="outline"
               size="icon"
               className="shrink-0"
-              aria-label="清理日志"
-              title="清理日志"
+              aria-label={t('clean.tooltip')}
+              title={t('clean.tooltip')}
             >
               <Trash2 className="size-4" />
             </Button>
@@ -205,8 +253,8 @@ export default function LogsPage() {
               variant="outline"
               size="icon"
               className="shrink-0"
-              aria-label="刷新列表"
-              title="刷新列表"
+              aria-label={t('common:actions.refresh')}
+              title={t('common:actions.refresh')}
             >
               <RefreshCw className="size-4" />
             </Button>
@@ -217,13 +265,13 @@ export default function LogsPage() {
       <div className="flex flex-col gap-2 flex-shrink-0">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 lg:gap-4">
           <div className="flex flex-col gap-1 text-xs lg:min-w-0">
-            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">模型名称</Label>
+            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.model')}</Label>
             <Select value={modelFilter} onValueChange={setModelFilter}>
               <SelectTrigger className="h-8 text-xs w-full px-2">
-                <SelectValue placeholder="选择模型" />
+                <SelectValue placeholder={t('filters.model_placeholder')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="all">{t('common:status.all')}</SelectItem>
                 {models.map((model) => (
                   <SelectItem key={model.ID} value={model.Name}>{model.Name}</SelectItem>
                 ))}
@@ -231,13 +279,13 @@ export default function LogsPage() {
             </Select>
           </div>
           <div className="flex flex-col gap-1 text-xs lg:min-w-0">
-            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">项目</Label>
+            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.project')}</Label>
             <Select value={authKeyFilter} onValueChange={setAuthKeyFilter}>
               <SelectTrigger className="h-8 text-xs w-full px-2">
-                <SelectValue placeholder="选择项目" />
+                <SelectValue placeholder={t('filters.project_placeholder')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="all">{t('common:status.all')}</SelectItem>
                 {authKeys.map((key) => (
                   <SelectItem key={key.id} value={key.id.toString()}>{key.name}</SelectItem>
                 ))}
@@ -245,38 +293,39 @@ export default function LogsPage() {
             </Select>
           </div>
           <div className="flex flex-col gap-1 text-xs lg:min-w-0">
-            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">状态</Label>
+            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.status')}</Label>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="h-8 text-xs w-full px-2">
-                <SelectValue placeholder="状态" />
+                <SelectValue placeholder={t('filters.status')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部</SelectItem>
-                <SelectItem value="success">成功</SelectItem>
-                <SelectItem value="error">错误</SelectItem>
+                <SelectItem value="all">{t('common:status.all')}</SelectItem>
+                <SelectItem value="success">{t('filters.status_success')}</SelectItem>
+                <SelectItem value="running">{t('filters.status_running')}</SelectItem>
+                <SelectItem value="error">{t('filters.status_error')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="flex flex-col gap-1 text-xs lg:min-w-0">
-            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">类型</Label>
+            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.type')}</Label>
             <Select value={styleFilter} onValueChange={setStyleFilter}>
               <SelectTrigger className="h-8 text-xs w-full px-2">
-                <SelectValue placeholder="类型" />
+                <SelectValue placeholder={t('filters.type')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="all">{t('common:status.all')}</SelectItem>
                 {availableStyles.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div className="col-span-2 flex flex-col gap-1 text-xs lg:min-w-0 sm:col-span-1">
-            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">提供商</Label>
+            <Label className="text-[11px] text-muted-foreground uppercase tracking-wide">{t('filters.provider')}</Label>
             <Select value={providerNameFilter} onValueChange={setProviderNameFilter}>
               <SelectTrigger className="h-8 text-xs w-full px-2">
-                <SelectValue placeholder="选择提供商" />
+                <SelectValue placeholder={t('filters.provider_placeholder')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="all">{t('common:status.all')}</SelectItem>
                 {providers.map((p) => (
                   <SelectItem key={p.ID} value={p.Name}>{p.Name}</SelectItem>
                 ))}
@@ -289,11 +338,11 @@ export default function LogsPage() {
       <div className="flex-1 min-h-0 border rounded-md bg-background shadow-sm">
         {loading ? (
           <div className="flex h-full items-center justify-center">
-            <Loading message="加载日志数据" />
+            <Loading message={t('loading')} />
           </div>
         ) : logs?.length === 0 ? (
           <div className="flex h-full items-center justify-center text-muted-foreground">
-            暂无请求日志
+            {t('no_data')}
           </div>
         ) : (
           <div className="h-full flex flex-col">
@@ -302,17 +351,17 @@ export default function LogsPage() {
                 <Table className="min-w-[1200px]">
                   <TableHeader className="z-10 sticky top-0 bg-secondary/90 backdrop-blur text-secondary-foreground">
                     <TableRow className="hover:bg-secondary/90">
-                      <TableHead>时间</TableHead>
-                      <TableHead>模型</TableHead>
-                      <TableHead>项目</TableHead>
-                      <TableHead>状态</TableHead>
-                      <TableHead>Tokens</TableHead>
-                      <TableHead>响应大小</TableHead>
-                      <TableHead>耗时</TableHead>
-                      <TableHead>提供商模型</TableHead>
-                      <TableHead>类型</TableHead>
-                      <TableHead>提供商</TableHead>
-                      <TableHead>操作</TableHead>
+                      <TableHead>{t('table.time')}</TableHead>
+                      <TableHead>{t('table.model')}</TableHead>
+                      <TableHead>{t('table.project')}</TableHead>
+                      <TableHead>{t('table.status')}</TableHead>
+                      <TableHead>{t('table.tokens')}</TableHead>
+                      <TableHead>{t('table.size')}</TableHead>
+                      <TableHead>{t('table.duration')}</TableHead>
+                      <TableHead>{t('table.provider_model')}</TableHead>
+                      <TableHead>{t('table.type')}</TableHead>
+                      <TableHead>{t('table.provider')}</TableHead>
+                      <TableHead>{t('table.actions')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -324,8 +373,7 @@ export default function LogsPage() {
                         <TableCell className="font-medium">{log.Name}</TableCell>
                         <TableCell className="text-xs">{log.key_name || '-'}</TableCell>
                         <TableCell>
-                          <span className={`inline-flex items-center px-2 py-1 ${log.Status === 'success' ? 'text-green-500' : 'text-red-500 '
-                            }`}>
+                          <span className={`inline-flex items-center px-2 py-1 ${getStatusTextClass(log.Status)}`}>
                             {log.Status}
                           </span>
                         </TableCell>
@@ -368,8 +416,7 @@ export default function LogsPage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <span
-                          className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${log.Status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                            }`}
+                          className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${getStatusPillClass(log.Status)}`}
                         >
                           {log.Status}
                         </span>
@@ -390,19 +437,19 @@ export default function LogsPage() {
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-xs">
                       <div className="space-y-1">
-                        <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Tokens</p>
+                        <p className="text-muted-foreground text-[10px] uppercase tracking-wide">{t('mobile.tokens')}</p>
                         <p className="font-medium">{log.total_tokens}</p>
                       </div>
                       <div className="space-y-1">
-                        <p className="text-muted-foreground text-[10px] uppercase tracking-wide">耗时</p>
-                        <p className="font-medium">{formatTime(log.ChunkTime)}</p>
+                        <p className="text-muted-foreground text-[10px] uppercase tracking-wide">{t('mobile.duration')}</p>
+                        <p className="font-medium">{formatTime(log.ChunkTime + log.FirstChunkTime + log.ProxyTime)}</p>
                       </div>
                       <div className="space-y-1">
-                        <p className="text-muted-foreground text-[10px] uppercase tracking-wide">提供商</p>
+                        <p className="text-muted-foreground text-[10px] uppercase tracking-wide">{t('mobile.provider')}</p>
                         <p className="truncate">{log.ProviderName}</p>
                       </div>
                       <div className="space-y-1">
-                        <p className="text-muted-foreground text-[10px] uppercase tracking-wide">类型</p>
+                        <p className="text-muted-foreground text-[10px] uppercase tracking-wide">{t('mobile.type')}</p>
                         <p>{log.Style || '-'}</p>
                       </div>
                     </div>
@@ -417,13 +464,13 @@ export default function LogsPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3 flex-shrink-0 border-t pt-2">
         <div className="text-sm text-muted-foreground whitespace-nowrap">
-          共 {total} 条，第 {page} / {pages} 页
+          {t('common:pagination.summary', { total, page, pages })}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Select value={String(pageSize)} onValueChange={(value) => handlePageSizeChange(Number(value))}>
               <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="条数" />
+                <SelectValue placeholder={t('common:pagination.per_page')} />
               </SelectTrigger>
               <SelectContent>
                 {[10, 20, 50].map((size) => (
@@ -440,7 +487,7 @@ export default function LogsPage() {
               size="icon"
               onClick={() => handlePageChange(page - 1)}
               disabled={page === 1}
-              aria-label="上一页"
+              aria-label={t('common:pagination.prev')}
             >
               <ChevronLeft className="size-4" />
             </Button>
@@ -449,7 +496,7 @@ export default function LogsPage() {
               size="icon"
               onClick={() => handlePageChange(page + 1)}
               disabled={page === pages}
-              aria-label="下一页"
+              aria-label={t('common:pagination.next')}
             >
               <ChevronRight className="size-4" />
             </Button>
@@ -462,7 +509,7 @@ export default function LogsPage() {
           <DialogContent className="p-0 w-[92vw] sm:w-auto sm:max-w-2xl max-h-[95vh] flex flex-col">
             <div className="p-4 border-b flex-shrink-0">
               <DialogHeader className="p-0">
-                <DialogTitle>日志详情: {selectedLog.ID}</DialogTitle>
+                <DialogTitle>{t('detail.title', { id: selectedLog.ID })}</DialogTitle>
               </DialogHeader>
             </div>
             <div className="overflow-y-auto p-3 flex-1">
@@ -470,12 +517,18 @@ export default function LogsPage() {
                 <div className="space-y-3">
                   <div className="space-y-2">
                     <div className="text-sm">
-                      <span className="text-muted-foreground">创建时间：</span>
+                      <span className="text-muted-foreground">{t('detail.created_at')}</span>
                       <span>{new Date(selectedLog.CreatedAt).toLocaleString()}</span>
                     </div>
+                    {selectedLog.TraceID && (
+                      <div className="text-sm">
+                        <span className="text-muted-foreground">{t('detail.trace_id')}</span>
+                        <span className="font-mono text-xs break-all">{selectedLog.TraceID}</span>
+                      </div>
+                    )}
                     <div className="text-sm">
-                      <span className="text-muted-foreground">状态：</span>
-                      <span className={selectedLog.Status === 'success' ? 'text-green-600' : 'text-red-600'}>
+                      <span className="text-muted-foreground">{t('detail.status')}</span>
+                      <span className={getStatusDetailClass(selectedLog.Status)}>
                         {selectedLog.Status}
                       </span>
                     </div>
@@ -483,44 +536,44 @@ export default function LogsPage() {
                 </div>
                 {selectedLog.Error && (
                   <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
-                    <p className="text-xs text-destructive uppercase tracking-wide mb-1">错误信息</p>
+                    <p className="text-xs text-destructive uppercase tracking-wide mb-1">{t('detail.error_title')}</p>
                     <div className="text-destructive whitespace-pre-wrap break-words text-sm">
                       {selectedLog.Error}
                     </div>
                   </div>
                 )}
                 <div className="space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">基本信息</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('detail.basic_info')}</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <DetailCard label="模型名称" value={selectedLog.Name} />
-                    <DetailCard label="提供商" value={selectedLog.ProviderName || '-'} />
-                    <DetailCard label="提供商模型" value={selectedLog.ProviderModel || '-'} mono />
-                    <DetailCard label="类型" value={selectedLog.Style || '-'} />
-                    <DetailCard label="响应大小" value={selectedLog.Size ? formatBytes(selectedLog.Size) : '-'} />
-                    <DetailCard label="远端 IP" value={selectedLog.RemoteIP || '-'} mono />
-                    <DetailCard label="记录 IO" value={selectedLog.ChatIO ? '是' : '否'} />
-                    <DetailCard label="重试次数" value={selectedLog.Retry ?? 0} />
+                    <DetailCard label={t('detail.model_name')} value={selectedLog.Name} />
+                    <DetailCard label={t('detail.provider')} value={selectedLog.ProviderName || '-'} />
+                    <DetailCard label={t('detail.provider_model')} value={selectedLog.ProviderModel || '-'} mono />
+                    <DetailCard label={t('detail.type')} value={selectedLog.Style || '-'} />
+                    <DetailCard label={t('detail.size')} value={selectedLog.Size ? formatBytes(selectedLog.Size) : '-'} />
+                    <DetailCard label={t('detail.remote_ip')} value={selectedLog.RemoteIP || '-'} mono />
+                    <DetailCard label={t('detail.io_log')} value={selectedLog.ChatIO ? t('detail.io_yes') : t('detail.io_no')} />
+                    <DetailCard label={t('detail.retry')} value={selectedLog.Retry ?? 0} />
                   </div>
                   <div className="grid grid-cols-1 gap-4">
-                    <DetailCard label="用户代理" value={selectedLog.UserAgent || '-'} mono />
+                    <DetailCard label={t('detail.user_agent')} value={selectedLog.UserAgent || '-'} mono />
                   </div>
                 </div>
                 <div className="space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">性能指标</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('detail.performance')}</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <DetailCard label="代理耗时" value={formatDurationValue(selectedLog.ProxyTime)} />
-                    <DetailCard label="首包耗时" value={formatDurationValue(selectedLog.FirstChunkTime)} />
-                    <DetailCard label="完成耗时" value={formatDurationValue(selectedLog.ChunkTime)} />
-                    <DetailCard label="TPS" value={formatTpsValue(selectedLog.Tps)} />
+                    <DetailCard label={t('detail.proxy_time')} value={formatDurationValue(selectedLog.ProxyTime)} />
+                    <DetailCard label={t('detail.first_chunk_time')} value={formatDurationValue(selectedLog.FirstChunkTime)} />
+                    <DetailCard label={t('detail.chunk_time')} value={formatDurationValue(selectedLog.ChunkTime)} />
+                    <DetailCard label={t('detail.tps')} value={formatTpsValue(selectedLog.Tps)} />
                   </div>
                 </div>
                 <div className="space-y-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Token 使用</p>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('detail.token_usage')}</p>
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                    <DetailCard label="输入" value={formatTokenValue(selectedLog.prompt_tokens)} />
-                    <DetailCard label="输出" value={formatTokenValue(selectedLog.completion_tokens)} />
-                    <DetailCard label="总计" value={formatTokenValue(selectedLog.total_tokens)} />
-                    <DetailCard label="缓存" value={formatTokenValue(selectedLog.prompt_tokens_details.cached_tokens)} />
+                    <DetailCard label={t('detail.input')} value={formatTokenValue(selectedLog.prompt_tokens)} />
+                    <DetailCard label={t('detail.output')} value={formatTokenValue(selectedLog.completion_tokens)} />
+                    <DetailCard label={t('detail.total')} value={formatTokenValue(selectedLog.total_tokens)} />
+                    <DetailCard label={t('detail.cached')} value={formatTokenValue(selectedLog.prompt_tokens_details.cached_tokens)} />
                   </div>
                 </div>
               </div>
@@ -532,7 +585,7 @@ export default function LogsPage() {
       <Dialog open={isCleanDialogOpen} onOpenChange={setIsCleanDialogOpen}>
         <DialogContent className="w-[92vw] sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>清理日志</DialogTitle>
+            <DialogTitle>{t('clean.title')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="flex gap-2">
@@ -542,7 +595,7 @@ export default function LogsPage() {
                 onClick={() => handleCleanTypeChange('count')}
                 className="flex-1"
               >
-                保留条数
+                {t('clean.by_count')}
               </Button>
               <Button
                 variant={cleanType === 'days' ? 'default' : 'outline'}
@@ -550,7 +603,7 @@ export default function LogsPage() {
                 onClick={() => handleCleanTypeChange('days')}
                 className="flex-1"
               >
-                保留天数
+                {t('clean.by_days')}
               </Button>
             </div>
             <div className="flex items-center gap-2">
@@ -559,24 +612,24 @@ export default function LogsPage() {
                 min="1"
                 value={cleanValue}
                 onChange={(e) => setCleanValue(e.target.value)}
-                placeholder={cleanType === 'count' ? '输入保留条数' : '输入保留天数'}
+                placeholder={cleanType === 'count' ? t('clean.count_placeholder') : t('clean.days_placeholder')}
                 className="h-10"
               />
               <span className="text-sm text-muted-foreground whitespace-nowrap">
-                {cleanType === 'count' ? '条' : '天'}
+                {cleanType === 'count' ? t('clean.count_unit') : t('clean.days_unit')}
               </span>
             </div>
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => setIsCleanDialogOpen(false)}>
-              取消
+              {t('clean.cancel')}
             </Button>
             <Button
               variant="destructive"
               onClick={handleCleanLogs}
               disabled={cleanLoading || !cleanValue || parseInt(cleanValue) <= 0}
             >
-              {cleanLoading ? '清理中...' : '确定清理'}
+              {cleanLoading ? t('clean.confirming') : t('clean.confirm')}
             </Button>
           </div>
         </DialogContent>
