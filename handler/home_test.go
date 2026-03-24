@@ -118,3 +118,100 @@ func TestModelTokenUsages_RejectsInvalidHours(t *testing.T) {
 		t.Fatalf("expected bad request code, got %d", response.Code)
 	}
 }
+
+func TestProviderModelCalls_ReturnsTopProviderModelsWithinHours(t *testing.T) {
+	cleanup := setupHomeTestDB(t)
+	defer cleanup()
+
+	now := time.Now()
+	logs := []models.ChatLog{
+		{ProviderName: "openai", ProviderModel: "gpt-4.1", Model: gorm.Model{CreatedAt: now.Add(-1 * time.Hour)}},
+		{ProviderName: "openai", ProviderModel: "gpt-4.1", Model: gorm.Model{CreatedAt: now.Add(-2 * time.Hour)}},
+		{ProviderName: "anthropic", ProviderModel: "claude-3-7-sonnet", Model: gorm.Model{CreatedAt: now.Add(-3 * time.Hour)}},
+		{ProviderName: "anthropic", ProviderModel: "claude-3-7-sonnet", Model: gorm.Model{CreatedAt: now.Add(-4 * time.Hour)}},
+		{ProviderName: "anthropic", ProviderModel: "claude-3-7-sonnet", Model: gorm.Model{CreatedAt: now.Add(-5 * time.Hour)}},
+		{ProviderName: "openai", ProviderModel: "gpt-4o-mini", Model: gorm.Model{CreatedAt: now.Add(-6 * time.Hour)}},
+		{ProviderName: "deepseek", ProviderModel: "", Name: "deepseek-v3", Model: gorm.Model{CreatedAt: now.Add(-7 * time.Hour)}},
+		{ProviderName: "qwen", ProviderModel: "qwen-max", Model: gorm.Model{CreatedAt: now.Add(-8 * time.Hour)}},
+		{ProviderName: "moonshot", ProviderModel: "kimi-k2", Model: gorm.Model{CreatedAt: now.Add(-9 * time.Hour)}},
+		{ProviderName: "old-provider", ProviderModel: "old-model", Model: gorm.Model{CreatedAt: now.Add(-48 * time.Hour)}},
+	}
+	if err := models.DB.Create(&logs).Error; err != nil {
+		t.Fatalf("failed to seed chat logs: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "hours", Value: "24"}}
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/metrics/provider-model-calls/24", nil)
+
+	ProviderModelCalls(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", recorder.Code)
+	}
+
+	var response common.Response
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	payload, err := json.Marshal(response.Data)
+	if err != nil {
+		t.Fatalf("failed to re-encode data: %v", err)
+	}
+
+	var counts []ProviderModelCall
+	if err := json.Unmarshal(payload, &counts); err != nil {
+		t.Fatalf("failed to decode counts: %v", err)
+	}
+
+	if len(counts) != 5 {
+		t.Fatalf("expected top 5 provider-model rows, got %d", len(counts))
+	}
+
+	if counts[0].Provider != "anthropic" || counts[0].Model != "claude-3-7-sonnet" || counts[0].Calls != 3 {
+		t.Fatalf("unexpected top provider-model count: %#v", counts[0])
+	}
+
+	foundFallback := false
+	for _, count := range counts {
+		if count.Provider == "deepseek" && count.Model == "deepseek-v3" && count.Calls == 1 {
+			foundFallback = true
+		}
+		if count.Provider == "old-provider" {
+			t.Fatalf("expected old-provider to be excluded from 24h window")
+		}
+	}
+
+	if !foundFallback {
+		t.Fatalf("expected empty provider_model to fall back to chat log name")
+	}
+}
+
+func TestProviderModelCalls_RejectsInvalidHours(t *testing.T) {
+	cleanup := setupHomeTestDB(t)
+	defer cleanup()
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "hours", Value: "0"}}
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/metrics/provider-model-calls/0", nil)
+
+	ProviderModelCalls(ctx)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected status 200 for bad request wrapper, got %d", recorder.Code)
+	}
+
+	var response common.Response
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected bad request code, got %d", response.Code)
+	}
+}

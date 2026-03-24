@@ -162,6 +162,12 @@ type ModelTokenUsage struct {
 	Tokens int64  `json:"tokens"`
 }
 
+type ProviderModelCall struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+	Calls    int64  `json:"calls"`
+}
+
 func Counts(c *gin.Context) {
 	results := make([]Count, 0)
 	if err := models.DB.
@@ -204,6 +210,32 @@ func ModelTokenUsages(c *gin.Context) {
 		Where("created_at >= ?", startTime).
 		Group("name").
 		Order("tokens DESC, name ASC").
+		Limit(5).
+		Scan(&results).Error; err != nil {
+		common.InternalServerError(c, err.Error())
+		return
+	}
+
+	common.Success(c, results)
+}
+
+func ProviderModelCalls(c *gin.Context) {
+	hours, err := strconv.Atoi(c.Param("hours"))
+	if err != nil || hours <= 0 {
+		common.BadRequest(c, "Invalid hours parameter")
+		return
+	}
+
+	results := make([]ProviderModelCall, 0)
+	startTime := time.Now().Add(-time.Duration(hours) * time.Hour)
+	providerExpr := "COALESCE(NULLIF(provider_name, ''), '-')"
+	modelExpr := "COALESCE(NULLIF(provider_model, ''), NULLIF(name, ''), '-')"
+	if err := models.DB.
+		Model(&models.ChatLog{}).
+		Select(providerExpr+" as provider, "+modelExpr+" as model, COUNT(*) as calls").
+		Where("created_at >= ?", startTime).
+		Group(providerExpr + ", " + modelExpr).
+		Order("calls DESC, provider ASC, model ASC").
 		Limit(5).
 		Scan(&results).Error; err != nil {
 		common.InternalServerError(c, err.Error())

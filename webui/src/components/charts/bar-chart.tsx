@@ -15,7 +15,6 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart"
-import type { ModelTokenUsage } from "@/lib/api"
 
 // 预定义颜色数组，按顺序生成颜色
 const predefinedColors = [
@@ -31,17 +30,22 @@ const predefinedColors = [
   "var(--chart-10)",
 ]
 
+export interface RankingChartItem {
+  label: string
+  value: number
+}
+
 // 根据模型数据生成图表配置
-const generateChartConfig = (data: ModelTokenUsage[]) => {
+const generateChartConfig = (data: RankingChartItem[], valueLabel: string) => {
   const config: ChartConfig = {
-    tokens: {
-      label: "Tokens",
+    value: {
+      label: valueLabel,
     },
   }
 
   data.forEach((item, index) => {
-    config[item.model] = {
-      label: item.model,
+    config[item.label] = {
+      label: item.label,
       color: predefinedColors[index % predefinedColors.length],
     }
   })
@@ -50,23 +54,24 @@ const generateChartConfig = (data: ModelTokenUsage[]) => {
 }
 
 // 根据模型数据生成图表数据
-const generateChartData = (data: ModelTokenUsage[]) => {
+const generateChartData = (data: RankingChartItem[]) => {
   return data.map((item, index) => ({
-    model: item.model,
-    tokens: item.tokens,
+    label: item.label,
+    value: item.value,
     fill: predefinedColors[index % predefinedColors.length],
   }))
 }
 
 interface ModelRankingChartProps {
-  data: ModelTokenUsage[]
+  data: RankingChartItem[]
   title: string
   description?: string
+  valueLabel: string
 }
 
-export function ModelRankingChart({ data, title, description }: ModelRankingChartProps) {
+export function ModelRankingChart({ data, title, description, valueLabel }: ModelRankingChartProps) {
   const chartData = generateChartData(data)
-  const chartConfig = generateChartConfig(data)
+  const chartConfig = generateChartConfig(data, valueLabel)
 
   return (
     <Card>
@@ -83,7 +88,7 @@ export function ModelRankingChart({ data, title, description }: ModelRankingChar
           >
             <CartesianGrid vertical={false} />
             <XAxis
-              dataKey="model"
+              dataKey="label"
               tickLine={false}
               axisLine={false}
               tickMargin={16}
@@ -91,7 +96,7 @@ export function ModelRankingChart({ data, title, description }: ModelRankingChar
               tickFormatter={(value) => String(value)}
             />
             <YAxis
-              dataKey="tokens"
+              dataKey="value"
               tickLine={false}
               axisLine={false}
               tickFormatter={(value) => Number(value).toLocaleString()}
@@ -102,12 +107,12 @@ export function ModelRankingChart({ data, title, description }: ModelRankingChar
               content={<ChartTooltipContent indicator="line" hideLabel />}
             />
             <Bar
-              dataKey="tokens"
-              fill="var(--color-tokens)"
+              dataKey="value"
+              fill="var(--color-value)"
               radius={[8, 8, 0, 0]}
             >
               <LabelList
-                dataKey="tokens"
+                dataKey="value"
                 position="top"
                 offset={12}
                 className="fill-foreground font-medium"

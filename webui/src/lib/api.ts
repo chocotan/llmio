@@ -392,6 +392,12 @@ export interface ModelTokenUsage {
   tokens: number;
 }
 
+export interface ProviderModelCall {
+  provider: string;
+  model: string;
+  calls: number;
+}
+
 export interface ProjectCount {
   project: string;
   calls: number;
@@ -427,6 +433,10 @@ export async function getModelCounts(): Promise<ModelCount[]> {
 
 export async function getModelTokenUsages(hours: number): Promise<ModelTokenUsage[]> {
   return apiRequest<ModelTokenUsage[]>(`/metrics/model-tokens/${hours}`);
+}
+
+export async function getProviderModelCalls(hours: number): Promise<ProviderModelCall[]> {
+  return apiRequest<ProviderModelCall[]>(`/metrics/provider-model-calls/${hours}`);
 }
 
 export async function getProjectCounts(): Promise<ProjectCount[]> {

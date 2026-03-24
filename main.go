@@ -93,6 +93,7 @@ func main() {
 		api.GET("/metrics/hourly/:hours", handler.HourlyMetrics)
 		api.GET("/metrics/counts", handler.Counts)
 		api.GET("/metrics/model-tokens/:hours", handler.ModelTokenUsages)
+		api.GET("/metrics/provider-model-calls/:hours", handler.ProviderModelCalls)
 		api.GET("/metrics/projects", handler.ProjectCounts)
 		// Provider management
 		api.GET("/providers/template", handler.GetProviderTemplates)
